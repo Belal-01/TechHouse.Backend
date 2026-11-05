@@ -1,0 +1,38 @@
+# Deployed as a Portainer stack (Repository mode, compose path: deploy/docker-compose.yml).
+# Set DB_PASSWORD, JWT_SECRET, etc. as the stack's environment variables in Portainer
+# (see deploy/.env.example for the list).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: techhouse
+      POSTGRES_USER: techhouse
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U techhouse -d techhouse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/belal-01/techhouse-backend:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/techhouse
+      SPRING_DATASOURCE_USERNAME: techhouse
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      RATE_API_URL: ${RATE_API_URL:-}
+      RATE_API_KEY: ${RATE_API_KEY:-}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
