@@ -12,6 +12,21 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Matches the datasource in application.yaml (localhost:5432/techhouse)
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: techhouse
+          POSTGRES_USER: techhouse
+          POSTGRES_PASSWORD: techhouse_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U techhouse -d techhouse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
