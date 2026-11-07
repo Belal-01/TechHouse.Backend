@@ -46,6 +46,14 @@ app:
     access-token-expiration: 15m
     refresh-token-expiration: 7d
   exchange-rate:
-    api-url: ${RATE_API_URL:}
+    # SPToday (https://sp-today.com). Without a key the app runs on manually entered rates only.
+    api-url: ${RATE_API_URL:https://api-v2.sp-today.com/api/v1}
     api-key: ${RATE_API_KEY:}
-    max-monthly-calls: 90
+    # Safety margin under the free tier's 100 calls/month.
+    max-monthly-calls: ${RATE_API_MAX_MONTHLY_CALLS:90}
+    # Twice a day, Damascus time: about 60 calls a month, leaving room for manual refreshes.
+    cron: ${RATE_API_CRON:0 0 10,16 * * *}
+    fetch-on-startup: ${RATE_FETCH_ON_STARTUP:true}
+    retry-backoff: 2s
+    # A new rate this far from the last approved one waits for review instead of being used.
+    max-jump-percent: 20

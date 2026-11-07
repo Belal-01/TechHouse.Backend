@@ -31,7 +31,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      RATE_API_URL: ${RATE_API_URL:-}
+      RATE_API_URL: ${RATE_API_URL:-https://api-v2.sp-today.com/api/v1}
       RATE_API_KEY: ${RATE_API_KEY:-}
     ports:
       - "${APP_PORT:-8085}:8080"
