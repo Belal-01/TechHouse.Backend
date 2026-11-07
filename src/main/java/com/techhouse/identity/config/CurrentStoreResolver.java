@@ -2,6 +2,7 @@ package com.techhouse.identity.config;
 
 import com.techhouse.shared.exception.BusinessException;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -31,23 +32,23 @@ public class CurrentStoreResolver implements HandlerMethodArgumentResolver {
 
         String storeIdHeader = webRequest.getHeader(STORE_HEADER);
         if (storeIdHeader == null || storeIdHeader.isBlank()) {
-            throw new BusinessException("Missing required header: " + STORE_HEADER);
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "STORE_HEADER_MISSING", "Missing required header: " + STORE_HEADER);
         }
 
         UUID storeId;
         try {
             storeId = UUID.fromString(storeIdHeader);
         } catch (IllegalArgumentException e) {
-            throw new BusinessException("Invalid store ID format");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "STORE_HEADER_MISSING", "Invalid store ID format");
         }
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !(auth.getDetails() instanceof JwtAuthDetails details)) {
-            throw new BusinessException("Authentication required");
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication required");
         }
 
         if (!details.storeIds().contains(storeId)) {
-            throw new BusinessException("Access denied to store: " + storeId);
+            throw new BusinessException(HttpStatus.FORBIDDEN, "STORE_ACCESS_DENIED", "Access denied to store: " + storeId);
         }
 
         return storeId;

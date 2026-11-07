@@ -10,6 +10,7 @@ import com.techhouse.identity.web.dto.UserDto;
 import com.techhouse.shared.exception.BusinessException;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,14 +30,14 @@ public class AuthService {
     @Transactional(readOnly = true)
     public AuthResponse login(String email, String password) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new BusinessException("Invalid email or password"));
+                .orElseThrow(() -> new BusinessException("INVALID_CREDENTIALS", "Invalid email or password"));
 
         if (!user.isActive()) {
-            throw new BusinessException("Account is disabled");
+            throw new BusinessException("ACCOUNT_DISABLED", "Account is disabled");
         }
 
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new BusinessException("Invalid email or password");
+            throw new BusinessException("INVALID_CREDENTIALS", "Invalid email or password");
         }
 
         return buildAuthResponse(user);
@@ -48,15 +49,15 @@ public class AuthService {
 
         String type = claims.get("type", String.class);
         if (!"refresh".equals(type)) {
-            throw new BusinessException("Invalid token type");
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "Invalid token type");
         }
 
         UUID userId = UUID.fromString(claims.getSubject());
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("User not found"));
+                .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "User not found"));
 
         if (!user.isActive()) {
-            throw new BusinessException("Account is disabled");
+            throw new BusinessException("ACCOUNT_DISABLED", "Account is disabled");
         }
 
         return buildAuthResponse(user);
