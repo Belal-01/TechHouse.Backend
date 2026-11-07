@@ -74,7 +74,7 @@ public class ProductImageService {
         if (imageRepository.deleteImage(imageId, productId) == 0) {
             throw new ResourceNotFoundException("IMAGE_NOT_FOUND", "Image", imageId);
         }
-        // Variants pointing at it are cleared by the database (ON DELETE SET NULL); close the gap in positions.
+        // Close the gap in positions.
         int position = 0;
         for (ProductImageMeta image : imageRepository.findByProductIdOrderByPositionAsc(productId)) {
             imageRepository.setPosition(image.getId(), position++);

@@ -1,7 +1,6 @@
 package com.techhouse.catalog.persistence;
 
 import com.techhouse.catalog.domain.Product;
-import com.techhouse.catalog.domain.ProductVariant;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -29,16 +28,10 @@ public final class ProductSpecifications {
             }
             if (search != null && !search.isBlank()) {
                 String pattern = "%" + escapeLike(search.trim().toLowerCase(Locale.ROOT)) + "%";
-                var variants = query.subquery(Integer.class);
-                var variant = variants.from(ProductVariant.class);
-                variants.select(cb.literal(1)).where(
-                        cb.equal(variant.get("product"), root),
-                        cb.or(
-                                cb.like(cb.lower(variant.get("sku")), pattern, '\\'),
-                                cb.like(cb.lower(variant.get("barcode")), pattern, '\\')));
                 predicates.add(cb.or(
                         cb.like(cb.lower(root.get("name")), pattern, '\\'),
-                        cb.exists(variants)));
+                        cb.like(cb.lower(root.get("sku")), pattern, '\\'),
+                        cb.like(cb.lower(root.get("barcode")), pattern, '\\')));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };

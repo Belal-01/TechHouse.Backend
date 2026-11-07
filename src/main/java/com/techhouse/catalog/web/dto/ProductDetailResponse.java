@@ -1,5 +1,6 @@
 package com.techhouse.catalog.web.dto;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -10,11 +11,12 @@ public record ProductDetailResponse(
         String name,
         String description,
         CategorySummary category,
+        String sku,
+        String barcode,
+        BigDecimal sellingPrice,
         Integer warrantyMonths,
         Map<String, String> specifications,
-        List<String> optionNames,
         boolean active,
-        List<VariantResponse> variants,
         List<ImageResponse> images,
         int version,
         Instant createdAt,

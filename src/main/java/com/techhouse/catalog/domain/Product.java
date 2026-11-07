@@ -1,11 +1,8 @@
 package com.techhouse.catalog.domain;
 
 import com.techhouse.shared.domain.BaseEntity;
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.OneToMany;
-import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -13,10 +10,9 @@ import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -39,6 +35,16 @@ public class Product extends BaseEntity {
     @Column(columnDefinition = "text")
     private String description;
 
+    @Column(length = 50)
+    private String sku;
+
+    @Column(length = 64)
+    private String barcode;
+
+    /** Selling price in USD. */
+    @Column(name = "selling_price", nullable = false)
+    private BigDecimal sellingPrice;
+
     @Column(name = "warranty_months")
     private Integer warrantyMonths;
 
@@ -46,17 +52,9 @@ public class Product extends BaseEntity {
     @Column(nullable = false, columnDefinition = "jsonb")
     private Map<String, String> specifications = new LinkedHashMap<>();
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "option_names", nullable = false, columnDefinition = "jsonb")
-    private List<String> optionNames = new ArrayList<>();
-
     @Column(nullable = false)
     private boolean active = true;
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
-
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
-    @OrderBy("position ASC")
-    private List<ProductVariant> variants = new ArrayList<>();
 }

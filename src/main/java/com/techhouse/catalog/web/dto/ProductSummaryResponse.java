@@ -9,11 +9,8 @@ public record ProductSummaryResponse(
         String name,
         CategorySummary category,
         boolean active,
-        int variantCount,
-        BigDecimal minPrice,
-        BigDecimal maxPrice,
+        BigDecimal sellingPrice,
         UUID primaryImageId,
-        /** SKU of the only variant; null when the product has several. */
         String sku,
         Instant updatedAt
 ) {}

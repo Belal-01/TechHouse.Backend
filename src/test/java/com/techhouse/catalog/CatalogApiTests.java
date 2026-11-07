@@ -23,7 +23,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -103,27 +102,17 @@ class CatalogApiTests {
         return new Reply(res.statusCode(), body, res.body(), type);
     }
 
-    private Map<String, Object> variant(String sku, String price, List<String> values) {
-        Map<String, Object> v = new LinkedHashMap<>();
-        v.put("optionValues", values);
-        v.put("sku", sku);
-        v.put("barcode", null);
-        v.put("sellingPrice", new java.math.BigDecimal(price));
-        v.put("imageId", null);
-        v.put("active", true);
-        return v;
-    }
-
-    private Map<String, Object> product(String name, UUID categoryId, List<String> options, List<Map<String, Object>> variants) {
+    private Map<String, Object> product(String name, UUID categoryId, String sku, String barcode, String price) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("name", name);
         p.put("description", "desc");
         p.put("categoryId", categoryId);
+        p.put("sku", sku);
+        p.put("barcode", barcode);
+        p.put("sellingPrice", new java.math.BigDecimal(price));
         p.put("warrantyMonths", 12);
         p.put("specifications", Map.of("RAM", "8GB"));
         p.put("active", true);
-        p.put("optionNames", options);
-        p.put("variants", variants);
         return p;
     }
 
@@ -172,49 +161,54 @@ class CatalogApiTests {
         assertTrue(call("GET", "/api/v1/admin/catalog/categories", null, DEFAULT_STORE_ID).body().path("data").size() >= 1);
 
         // --- validation
-        Reply invalid = call("POST", "/api/v1/admin/catalog/products",
-                product("", categoryId, List.of(), List.of(variant("A", "10", List.of()))), DEFAULT_STORE_ID);
+        Reply invalid = call("POST", "/api/v1/admin/catalog/products", product("", categoryId, "A", null, "10"), DEFAULT_STORE_ID);
         assertEquals(400, invalid.status());
         assertEquals("VALIDATION_ERROR", invalid.code());
         assertTrue(invalid.body().path("fieldErrors").has("name"));
-        Reply noOptions = call("POST", "/api/v1/admin/catalog/products",
-                product("P", categoryId, List.of(), List.of(variant("A", "10", List.of()), variant("B", "10", List.of()))), DEFAULT_STORE_ID);
-        assertEquals("PRODUCT_OPTIONS_REQUIRED", noOptions.code());
-        Reply mismatch = call("POST", "/api/v1/admin/catalog/products",
-                product("P", categoryId, List.of("Color"), List.of(variant("A", "10", List.of()))), DEFAULT_STORE_ID);
-        assertEquals("VARIANT_OPTIONS_MISMATCH", mismatch.code());
-        assertTrue(mismatch.body().path("fieldErrors").has("variants[0].optionValues"));
+        Reply zeroPrice = call("POST", "/api/v1/admin/catalog/products", product("P", categoryId, "A", null, "0"), DEFAULT_STORE_ID);
+        assertEquals("VALIDATION_ERROR", zeroPrice.code());
+        assertTrue(zeroPrice.body().path("fieldErrors").has("sellingPrice"));
+        Reply missingCategory = call("POST", "/api/v1/admin/catalog/products",
+                product("P", UUID.randomUUID(), "A", null, "10"), DEFAULT_STORE_ID);
+        assertEquals(404, missingCategory.status());
+        assertEquals("CATEGORY_NOT_FOUND", missingCategory.code());
 
-        // --- create a product with two variants
-        String sku1 = "SKU-" + RUN + "-1";
-        String sku2 = "SKU-" + RUN + "-2";
-        Reply p = call("POST", "/api/v1/admin/catalog/products", product("Phone " + RUN, categoryId, List.of("Color"),
-                List.of(variant(sku1, "100.50", List.of("Black")), variant(sku2, "120", List.of("White")))), DEFAULT_STORE_ID);
+        // --- create a product
+        String sku = "SKU-" + RUN;
+        String barcode = "BAR" + RUN;
+        Reply p = call("POST", "/api/v1/admin/catalog/products",
+                product("Phone " + RUN, categoryId, sku, barcode, "100.50"), DEFAULT_STORE_ID);
         assertEquals(201, p.status(), p.body().toString());
         JsonNode data = p.body().path("data");
         UUID productId = UUID.fromString(data.path("id").asString());
-        assertEquals(2, data.path("variants").size());
-        assertEquals("Black", data.path("variants").get(0).path("optionValues").get(0).asString());
+        assertEquals(sku, data.path("sku").asString());
+        assertEquals(100.5, data.path("sellingPrice").asDouble());
         assertEquals("8GB", data.path("specifications").path("RAM").asString());
         assertEquals(categoryName + "-x", data.path("category").path("name").asString());
+        assertTrue(data.path("variants").isMissingNode());
         int version = data.path("version").asInt();
 
-        // SKU used by another product in the store
+        // SKU / barcode already used by another product in the store
         Reply dupSku = call("POST", "/api/v1/admin/catalog/products",
-                product("Other " + RUN, null, List.of(), List.of(variant(sku1, "5", List.of()))), DEFAULT_STORE_ID);
+                product("Other " + RUN, null, sku, null, "5"), DEFAULT_STORE_ID);
         assertEquals(409, dupSku.status());
-        assertEquals("VARIANT_SKU_EXISTS", dupSku.code());
-        assertTrue(dupSku.body().path("fieldErrors").has("variants[0].sku"));
+        assertEquals("PRODUCT_SKU_EXISTS", dupSku.code());
+        assertTrue(dupSku.body().path("fieldErrors").has("sku"));
+        Reply dupBarcode = call("POST", "/api/v1/admin/catalog/products",
+                product("Other " + RUN, null, null, barcode, "5"), DEFAULT_STORE_ID);
+        assertEquals("PRODUCT_BARCODE_EXISTS", dupBarcode.code());
+        assertTrue(dupBarcode.body().path("fieldErrors").has("barcode"));
 
         // --- list, search, category filter
-        Reply list = call("GET", "/api/v1/admin/catalog/products?page=0&size=10&sort=name&search=" + sku2, null, DEFAULT_STORE_ID);
+        Reply list = call("GET", "/api/v1/admin/catalog/products?page=0&size=10&sort=name&search=" + sku, null, DEFAULT_STORE_ID);
         assertEquals(200, list.status());
         JsonNode page = list.body().path("data");
         assertEquals(1, page.path("totalElements").asInt());
         JsonNode summary = page.path("content").get(0);
-        assertEquals(2, summary.path("variantCount").asInt());
-        assertEquals(100.5, summary.path("minPrice").asDouble());
-        assertEquals(120.0, summary.path("maxPrice").asDouble());
+        assertEquals(100.5, summary.path("sellingPrice").asDouble());
+        assertEquals(sku, summary.path("sku").asString());
+        assertEquals(1, call("GET", "/api/v1/admin/catalog/products?search=" + barcode, null, DEFAULT_STORE_ID)
+                .body().path("data").path("totalElements").asInt());
         assertEquals(1, call("GET", "/api/v1/admin/catalog/products?categoryId=" + categoryId, null, DEFAULT_STORE_ID)
                 .body().path("data").path("totalElements").asInt());
 
@@ -237,34 +231,28 @@ class CatalogApiTests {
         assertEquals(id2, order.body().path("data").get(0).path("id").asString());
         assertEquals("IMAGE_ORDER_INVALID", call("PUT", "/api/v1/admin/catalog/products/" + productId + "/images/order",
                 Map.of("imageIds", List.of(id2)), DEFAULT_STORE_ID).code());
+        assertEquals(id2, call("GET", "/api/v1/admin/catalog/products?search=" + sku, null, DEFAULT_STORE_ID)
+                .body().path("data").path("content").get(0).path("primaryImageId").asString());
 
-        // --- update: keep variant 1 (with image), drop variant 2, add a new one; optimistic locking
+        // --- update with optimistic locking
         JsonNode current = call("GET", "/api/v1/admin/catalog/products/" + productId, null, DEFAULT_STORE_ID).body().path("data");
-        assertEquals(id2, current.path("images").get(0).path("id").asString());
-        Map<String, Object> keep = variant(sku1, "99", List.of("Black"));
-        keep.put("id", current.path("variants").get(0).path("id").asString());
-        keep.put("imageId", id1);
-        Map<String, Object> update = product("Phone " + RUN + " v2", categoryId, List.of("Color"),
-                new ArrayList<>(List.of(keep, variant(sku2 + "n", "130", List.of("Red")))));
+        Map<String, Object> update = product("Phone " + RUN + " v2", categoryId, sku, barcode, "99");
         update.put("version", current.path("version").asInt());
         Reply updated = call("PUT", "/api/v1/admin/catalog/products/" + productId, update, DEFAULT_STORE_ID);
         assertEquals(200, updated.status(), updated.body().toString());
         assertEquals("Phone " + RUN + " v2", updated.body().path("data").path("name").asString());
-        assertEquals(2, updated.body().path("data").path("variants").size());
-        assertEquals(id1, updated.body().path("data").path("variants").get(0).path("imageId").asString());
+        assertEquals(99.0, updated.body().path("data").path("sellingPrice").asDouble());
         assertTrue(updated.body().path("data").path("version").asInt() > version);
 
         Reply stale = call("PUT", "/api/v1/admin/catalog/products/" + productId, update, DEFAULT_STORE_ID);
         assertEquals(409, stale.status());
         assertEquals("CONCURRENT_MODIFICATION", stale.code());
 
-        // deleting an image clears the variant that used it
-        assertEquals(204, call("DELETE", "/api/v1/admin/catalog/products/" + productId + "/images/" + id1, null, DEFAULT_STORE_ID).status());
+        // deleting an image closes the gap in positions
+        assertEquals(204, call("DELETE", "/api/v1/admin/catalog/products/" + productId + "/images/" + id2, null, DEFAULT_STORE_ID).status());
         JsonNode afterDelete = call("GET", "/api/v1/admin/catalog/products/" + productId, null, DEFAULT_STORE_ID).body().path("data");
         assertEquals(1, afterDelete.path("images").size());
         assertEquals(0, afterDelete.path("images").get(0).path("position").asInt());
-        assertTrue(afterDelete.path("variants").get(0).path("imageId").isMissingNode()
-                || afterDelete.path("variants").get(0).path("imageId").isNull());
 
         // --- category in use, then delete everything
         Reply inUse = call("DELETE", "/api/v1/admin/catalog/categories/" + categoryId, null, DEFAULT_STORE_ID);
@@ -276,13 +264,12 @@ class CatalogApiTests {
         assertEquals("PRODUCT_NOT_FOUND", gone.code());
         assertEquals(204, call("DELETE", "/api/v1/admin/catalog/categories/" + categoryId, null, DEFAULT_STORE_ID).status());
 
-        // the SKU of a deleted product can be reused
+        // the SKU and barcode of a deleted product can be reused
         Reply reuse = call("POST", "/api/v1/admin/catalog/products",
-                product("Again " + RUN, null, List.of(), List.of(variant(sku1, "5", List.of()))), DEFAULT_STORE_ID);
+                product("Again " + RUN, null, sku, barcode, "5"), DEFAULT_STORE_ID);
         assertEquals(201, reuse.status(), reuse.body().toString());
 
         // --- cleanup (test data only)
-        jdbc.update("delete from product_variants where store_id = ? and sku like ?", DEFAULT_STORE_ID, "SKU-" + RUN + "%");
         jdbc.update("delete from products where store_id = ? and name like ?", DEFAULT_STORE_ID, "%" + RUN + "%");
         jdbc.update("delete from store_members where user_id = ?", user.getId());
         jdbc.update("delete from users where id = ?", user.getId());

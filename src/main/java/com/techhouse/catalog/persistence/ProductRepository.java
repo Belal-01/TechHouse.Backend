@@ -18,6 +18,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
 
     long countByCategoryIdAndDeletedAtIsNull(UUID categoryId);
 
+    /** SKU already used by another non-deleted product of the store. */
+    boolean existsByStoreIdAndSkuAndDeletedAtIsNullAndIdNot(UUID storeId, String sku, UUID id);
+
+    boolean existsByStoreIdAndBarcodeAndDeletedAtIsNullAndIdNot(UUID storeId, String barcode, UUID id);
+
     /** Soft-deleted products keep no category once the category itself is deleted. */
     @Modifying
     @Query("update Product p set p.categoryId = null where p.categoryId = :categoryId")
