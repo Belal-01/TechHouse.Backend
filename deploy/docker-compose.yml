@@ -32,7 +32,7 @@ services:
       RATE_API_URL: ${RATE_API_URL:-}
       RATE_API_KEY: ${RATE_API_KEY:-}
     ports:
-      - "8080:8080"
+      - "${APP_PORT:-8085}:8080"
 
 volumes:
   pgdata:
