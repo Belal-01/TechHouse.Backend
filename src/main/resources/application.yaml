@@ -31,6 +31,11 @@ server:
   port: 8080
 
 app:
+  admin:
+    # Initial OWNER account, created at startup only when both are set (see AdminSeeder).
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+    display-name: ${ADMIN_DISPLAY_NAME:Admin}
   jwt:
     secret: ${JWT_SECRET:dev-secret-key-must-be-at-least-256-bits-long-for-hs256}
     access-token-expiration: 15m
