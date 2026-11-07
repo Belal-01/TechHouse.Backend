@@ -203,14 +203,15 @@ public class ExchangeRateService {
         }
         BigDecimal mid = mid(fetched.buy(), fetched.sell());
         ExchangeRate inUse = first(store.getId(), ExchangeRate.Status.ACTIVE);
-        boolean jumped = inUse != null && isJump(inUse.getMidRate(), mid);
+        // Sales use the sell rate, so that is the one guarded against sudden jumps.
+        boolean jumped = inUse != null && isJump(inUse.getSellRate(), scale(fetched.sell()));
 
         // A jump goes to the day's pending row; the rate in use stays untouched until someone approves it.
         ExchangeRate row = jumped ? todayRow(store, ExchangeRate.Status.PENDING_REVIEW)
                 : active != null ? active : todayRow(store, ExchangeRate.Status.ACTIVE);
         if (jumped) {
-            log.warn("Exchange rate for store {} jumped from {} to {}; waiting for review", store.getId(),
-                    inUse.getMidRate(), mid);
+            log.warn("Sell rate for store {} jumped from {} to {}; waiting for review", store.getId(),
+                    inUse.getSellRate(), fetched.sell());
         }
         row.setBuyRate(scale(fetched.buy()));
         row.setSellRate(scale(fetched.sell()));

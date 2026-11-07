@@ -13,8 +13,9 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 /**
- * One rate per store, day and pair (e.g. USD/SYP = how many SYP one dollar costs). {@code midRate} = (buy + sell) / 2
- * is the rate the app uses. Orders and expenses copy the value they used, so later changes never rewrite them.
+ * One approved rate per store, day and pair (e.g. USD/SYP = how many SYP one dollar costs). Sales are converted with
+ * {@code sellRate}; {@code midRate} = (buy + sell) / 2 is kept for reference. Orders and expenses copy the value they
+ * used, so later changes never rewrite them.
  */
 @Entity
 @Table(name = "exchange_rates")

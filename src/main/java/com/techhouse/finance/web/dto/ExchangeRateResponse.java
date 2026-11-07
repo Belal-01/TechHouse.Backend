@@ -12,8 +12,9 @@ public record ExchangeRateResponse(
         LocalDate rateDate,
         String currencyPair,
         BigDecimal buyRate,
+        /** Used to convert sales. */
         BigDecimal sellRate,
-        /** (buy + sell) / 2: the rate the app uses. */
+        /** (buy + sell) / 2, for reference. */
         BigDecimal midRate,
         ExchangeRate.Source source,
         ExchangeRate.Status status,

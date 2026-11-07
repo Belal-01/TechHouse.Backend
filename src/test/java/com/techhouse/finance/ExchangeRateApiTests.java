@@ -185,7 +185,7 @@ class ExchangeRateApiTests {
         assertEquals(todayId.toString(), moved.path("id").asString());
         assertEquals(0, new BigDecimal("14550").compareTo(dec(moved.path("midRate"))));
 
-        // --- a jump over 20% waits for review; the rate in use does not change
+        // --- a jump over 20% in the sell rate (used for sales) waits for review; the rate in use does not change
         BODY.set(overview(20000, 20100));
         JsonNode jumped = call("POST", "/refresh", null).data();
         assertEquals(0, new BigDecimal("14550").compareTo(dec(jumped.path("current").path("midRate"))));
@@ -210,6 +210,12 @@ class ExchangeRateApiTests {
         JsonNode settled = call("POST", "/refresh", null).data();
         assertTrue(settled.path("pendingReview").isMissingNode() || settled.path("pendingReview").isNull());
         assertEquals(0, new BigDecimal("20150").compareTo(dec(settled.path("current").path("midRate"))));
+
+        // only the sell rate is guarded: a big move in the buy rate alone is applied directly
+        BODY.set(overview(16000, 20300));
+        JsonNode buyMoved = call("POST", "/refresh", null).data();
+        assertTrue(buyMoved.path("pendingReview").isMissingNode() || buyMoved.path("pendingReview").isNull());
+        assertEquals(0, new BigDecimal("20300").compareTo(dec(buyMoved.path("current").path("sellRate"))));
 
         // --- manual rate: validated, replaces today's rate, and the schedule leaves it alone
         assertEquals("RATE_SELL_BELOW_BUY", call("PUT", "/today", Map.of("buyRate", 15000, "sellRate", 14000)).code());
