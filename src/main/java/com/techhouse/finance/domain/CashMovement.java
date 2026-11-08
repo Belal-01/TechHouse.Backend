@@ -34,6 +34,12 @@ public class CashMovement {
     @Column(nullable = false, updatable = false, precision = 19, scale = 4)
     private BigDecimal amount;
 
+    @Column(name = "exchange_rate_id", updatable = false)
+    private UUID exchangeRateId;
+
+    @Column(name = "exchange_rate_snapshot", updatable = false, precision = 19, scale = 4)
+    private BigDecimal exchangeRateSnapshot;
+
     @Column(name = "reference_type", updatable = false, length = 30)
     private String referenceType;
 

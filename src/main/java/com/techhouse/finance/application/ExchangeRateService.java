@@ -78,6 +78,18 @@ public class ExchangeRateService {
                 ExchangeRate.USD_SYP, from).stream().map(ExchangeRateResponse::from).toList();
     }
 
+    /**
+     * The rate sales and expenses are valued at: the sell rate of the latest approved rate (even if it is not from
+     * today; the header warns about that). Empty when the store has never had a rate.
+     */
+    @Transactional(readOnly = true)
+    public java.util.Optional<SaleRate> saleRate(UUID storeId) {
+        return java.util.Optional.ofNullable(first(storeId, ExchangeRate.Status.ACTIVE))
+                .map(r -> new SaleRate(r.getId(), r.getSellRate(), r.getRateDate()));
+    }
+
+    public record SaleRate(UUID id, BigDecimal sellRate, LocalDate rateDate) {}
+
     // ---- Commands --------------------------------------------------------------------
 
     /** "Refresh now": fetches and replaces today's rate, even one entered manually. */

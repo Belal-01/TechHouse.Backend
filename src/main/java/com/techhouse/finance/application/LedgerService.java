@@ -21,7 +21,17 @@ public class LedgerService {
     @Transactional(propagation = Propagation.MANDATORY)
     public void record(UUID storeId, String walletCurrency, String movementType, BigDecimal signedAmount,
                        String referenceType, UUID referenceId, String note) {
+        record(storeId, walletCurrency, movementType, signedAmount, null, null, referenceType, referenceId, note);
+    }
+
+    /** Same, keeping the exchange rate the amount was valued at (for SYP movements). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void record(UUID storeId, String walletCurrency, String movementType, BigDecimal signedAmount,
+                       UUID exchangeRateId, BigDecimal exchangeRateSnapshot,
+                       String referenceType, UUID referenceId, String note) {
         CashMovement m = new CashMovement();
+        m.setExchangeRateId(exchangeRateId);
+        m.setExchangeRateSnapshot(exchangeRateSnapshot);
         m.setStoreId(storeId);
         m.setWalletCurrency(walletCurrency);
         m.setMovementType(movementType);
