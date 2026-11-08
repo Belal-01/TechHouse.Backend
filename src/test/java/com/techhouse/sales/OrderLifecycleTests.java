@@ -327,6 +327,38 @@ class OrderLifecycleTests {
         assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0,
                 "after advances: net worth changed by " + netWorth().subtract(startWorth) + ", profit " + netProfit());
 
+        // --- the dashboard and the wealth page tell the same story as the books
+        String today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Damascus")).toString();
+        Reply dash = call("GET", "/dashboard?from=" + today + "&to=" + today, null);
+        assertEquals(200, dash.status(), dash.body().toString());
+        JsonNode pnl = dash.data().path("pnl");
+        assertMoney("144.00", pnl.path("revenueUsd"));
+        assertMoney("74.00", pnl.path("cogsUsd"));
+        assertMoney("66.59", pnl.path("netProfitUsd"));                            // = net profit of the books
+        assertEquals(0, netProfit().setScale(2, RoundingMode.HALF_UP).compareTo(pnl.path("netProfitUsd").decimalValue()));
+        // profit share: 25% by default, editable (name and percent)
+        assertEquals(0, new BigDecimal("25").compareTo(dash.data().path("profitShare").path("percent").decimalValue()));
+        assertMoney("16.65", dash.data().path("profitShare").path("amountUsd"));      // 25% of 66.59
+        assertEquals("VALIDATION_ERROR", call("PUT", "/dashboard/profit-share", Map.of("label", "x", "percent", 150)).code());
+        assertEquals(200, call("PUT", "/dashboard/profit-share", Map.of("label", "حصة الشريك", "percent", 10)).status());
+        JsonNode share = call("GET", "/dashboard?from=" + today + "&to=" + today, null).data().path("profitShare");
+        assertEquals("حصة الشريك", share.path("label").asString());
+        assertMoney("6.66", share.path("amountUsd"));
+        assertEquals(1, dash.data().path("returns").path("returned").asInt());
+        assertMoney("1.03", dash.data().path("returns").path("deliveryCostUsd"));
+        assertEquals("A", dash.data().path("topProducts").get(0).path("name").asString());
+        assertEquals(0, dash.data().path("pending").path("count").asInt());
+        BigDecimal dashWealth = dash.data().path("wealth").path("totalUsd").decimalValue();
+        assertTrue(dashWealth.subtract(netWorth()).abs().compareTo(new BigDecimal("0.02")) < 0,
+                "dashboard wealth " + dashWealth + " vs books " + netWorth());
+        JsonNode wealth = call("GET", "/dashboard/wealth", null).data();
+        assertEquals(0, dashWealth.compareTo(wealth.path("totals").path("totalUsd").decimalValue()));
+        assertEquals(2, wealth.path("accounts").size());
+        assertEquals(8, wealth.path("stock").get(0).path("available").asInt());
+        assertMoney("56.00", wealth.path("totals").path("inventoryUsd"));           // 8 × 7$ (FIFO left the 7$ lot)
+        assertEquals(1, wealth.path("advances").size());
+        assertEquals("INVALID_PERIOD", call("GET", "/dashboard?from=" + today + "&to=2020-01-01", null).code());
+
         // the ledger lists every movement with what caused it
         JsonNode ledgerPage = call("GET", "/finance/movements?accountId=" + shamCash, null).data();
         assertTrue(ledgerPage.path("content").valueStream().anyMatch(m -> m.path("type").asString().equals("SALE_PAYMENT")

@@ -45,6 +45,11 @@ app:
     secret: ${JWT_SECRET:dev-secret-key-must-be-at-least-256-bits-long-for-hs256}
     access-token-expiration: 15m
     refresh-token-expiration: 7d
+  dashboard:
+    # A product with fewer units than this (and some purchase history) shows as running low.
+    low-stock-threshold: 3
+    # A pending order older than this many days shows as late.
+    late-order-days: 4
   exchange-rate:
     # SPToday (https://sp-today.com). Without a key the app runs on manually entered rates only.
     api-url: ${RATE_API_URL:https://api-v2.sp-today.com/api/v1}
