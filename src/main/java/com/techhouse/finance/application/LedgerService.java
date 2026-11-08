@@ -15,30 +15,52 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LedgerService {
 
+    /**
+     * One ledger row. {@code amount} is signed (+ into the box, − out of it), in {@code currency}.
+     * {@code rate} is the SYP-per-USD rate the amount was valued at, when relevant.
+     */
+    public record Entry(UUID storeId, UUID accountId, String currency, String type, BigDecimal amount,
+                        UUID rateId, BigDecimal rate, String referenceType, UUID referenceId, UUID group, String note) {
+
+        public static Entry of(UUID storeId, UUID accountId, String currency, String type, BigDecimal amount) {
+            return new Entry(storeId, accountId, currency, type, amount, null, null, null, null, null, null);
+        }
+
+        public Entry rate(UUID rateId, BigDecimal rate) {
+            return new Entry(storeId, accountId, currency, type, amount, rateId, rate, referenceType, referenceId, group, note);
+        }
+
+        public Entry ref(String referenceType, UUID referenceId) {
+            return new Entry(storeId, accountId, currency, type, amount, rateId, rate, referenceType, referenceId, group, note);
+        }
+
+        public Entry group(UUID group) {
+            return new Entry(storeId, accountId, currency, type, amount, rateId, rate, referenceType, referenceId, group, note);
+        }
+
+        public Entry note(String note) {
+            return new Entry(storeId, accountId, currency, type, amount, rateId, rate, referenceType, referenceId, group, note);
+        }
+    }
+
     private final EntityManager em;
 
     /** Joins the caller's transaction: the movement and the business record commit or roll back together. */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void record(UUID storeId, String walletCurrency, String movementType, BigDecimal signedAmount,
-                       String referenceType, UUID referenceId, String note) {
-        record(storeId, walletCurrency, movementType, signedAmount, null, null, referenceType, referenceId, note);
-    }
-
-    /** Same, keeping the exchange rate the amount was valued at (for SYP movements). */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void record(UUID storeId, String walletCurrency, String movementType, BigDecimal signedAmount,
-                       UUID exchangeRateId, BigDecimal exchangeRateSnapshot,
-                       String referenceType, UUID referenceId, String note) {
+    public CashMovement record(Entry e) {
         CashMovement m = new CashMovement();
-        m.setExchangeRateId(exchangeRateId);
-        m.setExchangeRateSnapshot(exchangeRateSnapshot);
-        m.setStoreId(storeId);
-        m.setWalletCurrency(walletCurrency);
-        m.setMovementType(movementType);
-        m.setAmount(signedAmount);
-        m.setReferenceType(referenceType);
-        m.setReferenceId(referenceId);
-        m.setNote(note);
+        m.setStoreId(e.storeId());
+        m.setAccountId(e.accountId());
+        m.setWalletCurrency(e.currency());
+        m.setMovementType(e.type());
+        m.setAmount(e.amount());
+        m.setExchangeRateId(e.rateId());
+        m.setExchangeRateSnapshot(e.rate());
+        m.setReferenceType(e.referenceType());
+        m.setReferenceId(e.referenceId());
+        m.setExchangeGroup(e.group());
+        m.setNote(e.note());
         em.persist(m);
+        return m;
     }
 }

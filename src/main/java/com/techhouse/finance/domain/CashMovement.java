@@ -25,6 +25,9 @@ public class CashMovement {
     @Column(name = "store_id", nullable = false, updatable = false)
     private UUID storeId;
 
+    @Column(name = "account_id", nullable = false, updatable = false)
+    private UUID accountId;
+
     @Column(name = "wallet_currency", nullable = false, updatable = false, length = 3)
     private String walletCurrency;
 
@@ -45,6 +48,10 @@ public class CashMovement {
 
     @Column(name = "reference_id", updatable = false)
     private UUID referenceId;
+
+    /** Links the two halves of a transfer or currency exchange. */
+    @Column(name = "exchange_group", updatable = false)
+    private UUID exchangeGroup;
 
     @Column(updatable = false)
     private String note;

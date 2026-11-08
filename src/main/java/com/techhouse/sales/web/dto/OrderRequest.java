@@ -29,5 +29,7 @@ public record OrderRequest(
         @DecimalMin("0") @DecimalMax("10000000000") BigDecimal deliveryCost,
         @Pattern(regexp = "USD|SYP") String deliveryCostCurrency,
         UUID deliveryCompanyId,
+        /** The box that pays the delivery company; the default box when omitted. */
+        UUID deliveryAccountId,
         @Size(max = 5000) String notes
 ) {}

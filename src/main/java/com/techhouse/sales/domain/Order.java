@@ -77,6 +77,10 @@ public class Order extends BaseEntity {
     @Column(name = "ordered_at", nullable = false, updatable = false)
     private Instant orderedAt;
 
+    /** The box the customer's money went into on delivery. */
+    @Column(name = "payment_account_id")
+    private UUID paymentAccountId;
+
     @Column(name = "delivered_at")
     private Instant deliveredAt;
 

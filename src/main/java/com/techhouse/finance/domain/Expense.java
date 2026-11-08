@@ -30,8 +30,12 @@ public class Expense {
     @Column(name = "order_id", updatable = false)
     private UUID orderId;
 
-    @Column(nullable = false, length = 30)
-    private String category;
+    @Column(name = "category_id", nullable = false)
+    private UUID categoryId;
+
+    /** The box that paid it; null when it was paid out of a staff advance. */
+    @Column(name = "account_id", updatable = false)
+    private UUID accountId;
 
     private String description;
 

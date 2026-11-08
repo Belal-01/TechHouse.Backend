@@ -2,7 +2,10 @@ package com.techhouse.sales.application;
 
 import com.techhouse.catalog.domain.Product;
 import com.techhouse.catalog.persistence.ProductRepository;
+import com.techhouse.finance.application.CashAccountService;
 import com.techhouse.finance.application.ExchangeRateService;
+import com.techhouse.finance.domain.CashAccount;
+import com.techhouse.finance.domain.ExpenseCategory;
 import com.techhouse.finance.application.ExpenseService;
 import com.techhouse.finance.application.LedgerService;
 import com.techhouse.identity.config.CurrentUser;
@@ -69,6 +72,7 @@ public class OrderService {
     private final ExpenseService expenses;
     private final LedgerService ledger;
     private final ExchangeRateService rates;
+    private final CashAccountService accounts;
     private final EntityManager em;
 
     // ---- Queries ---------------------------------------------------------------------
@@ -123,6 +127,8 @@ public class OrderService {
         }
 
         Map<UUID, Product> productById = loadProducts(storeId, request.items());
+        CashAccount deliveryAccount = deliveryCost.signum() > 0
+                ? accounts.resolve(storeId, request.deliveryAccountId(), "deliveryAccountId") : null;
 
         Order order = new Order();
         order.setStoreId(storeId);
@@ -170,10 +176,11 @@ public class OrderService {
         }
 
         if (deliveryCost.signum() > 0) {
-            expenses.record(storeId, order.getId(), "DELIVERY", "Delivery " + order.getOrderNumber()
-                            + (company == null ? "" : " (" + company.getName() + ")"),
-                    deliveryCost, costCurrency, rate == null ? null : rate.id(), rate == null ? null : rate.sellRate(),
-                    today(storeId));
+            expenses.record(new ExpenseService.Draft(storeId, order.getId(),
+                    expenses.systemCategory(storeId, ExpenseCategory.DELIVERY),
+                    "توصيل الطلب " + order.getOrderNumber() + (company == null ? "" : " (" + company.getName() + ")"),
+                    deliveryCost, costCurrency, deliveryAccount.getId(), rate == null ? null : rate.id(),
+                    rate == null ? null : rate.sellRate(), today(storeId)));
         }
         log(order, null, OrderStatus.PENDING, null);
         em.flush();
@@ -182,12 +189,15 @@ public class OrderService {
 
     /** The customer received it: the full amount goes into the wallet of the order's currency. */
     @Transactional
-    public OrderDetail deliver(UUID storeId, UUID id, String note) {
+    public OrderDetail deliver(UUID storeId, UUID id, UUID accountId, String note) {
         Order order = lockPending(storeId, id);
+        CashAccount account = accounts.resolve(storeId, accountId, "accountId");
         order.setStatus(OrderStatus.DELIVERED);
         order.setDeliveredAt(Instant.now());
-        ledger.record(storeId, order.getCurrency(), "SALE_PAYMENT", order.customerTotal(), order.getExchangeRateId(),
-                order.getExchangeRateSnapshot(), REF, order.getId(), "Payment " + order.getOrderNumber());
+        order.setPaymentAccountId(account.getId());
+        ledger.record(LedgerService.Entry.of(storeId, account.getId(), order.getCurrency(), "SALE_PAYMENT", order.customerTotal())
+                .rate(order.getExchangeRateId(), order.getExchangeRateSnapshot()).ref(REF, order.getId())
+                .note("تحصيل الطلب " + order.getOrderNumber()));
         log(order, OrderStatus.PENDING, OrderStatus.DELIVERED, note);
         em.flush();
         return toDetail(order);
@@ -211,7 +221,7 @@ public class OrderService {
     public OrderDetail voidOrder(UUID storeId, UUID id, String note) {
         Order order = lockPending(storeId, id);
         inventory.restore(allocationsOf(order.getId()));
-        expenses.voidForOrder(storeId, order.getId(), "Void " + order.getOrderNumber());
+        expenses.voidForOrder(storeId, order.getId(), "إلغاء الطلب " + order.getOrderNumber());
         order.setStatus(OrderStatus.VOIDED);
         order.setVoidedAt(Instant.now());
         log(order, OrderStatus.PENDING, OrderStatus.VOIDED, note);
@@ -326,8 +336,15 @@ public class OrderService {
                 new OrderDetail.Customer(o.getCustomerName(), o.getCustomerPhone(), o.getCustomerAddress()),
                 o.getCurrency(), o.getExchangeRateSnapshot(), detailItems, o.getItemsTotal(), o.getDeliveryFeeCharged(),
                 o.customerTotal(), o.getDeliveryCost(), o.getDeliveryCostCurrency(), ref(company),
-                money(o, lines.costOf(o.getId())), o.getNotes(), o.getOrderedAt(), o.getDeliveredAt(),
+                accountRef(o.getPaymentAccountId()), money(o, lines.costOf(o.getId())), o.getNotes(), o.getOrderedAt(), o.getDeliveredAt(),
                 o.getReturnedAt(), o.getVoidedAt(), events, o.getVersion());
+    }
+
+    private OrderDetail.Ref accountRef(UUID accountId) {
+        if (accountId == null) return null;
+        String name = (String) em.createNativeQuery("select name from cash_accounts where id = :id")
+                .setParameter("id", accountId).getSingleResult();
+        return new OrderDetail.Ref(accountId, name);
     }
 
     private Map<UUID, DeliveryCompany> companiesFor(List<Order> list) {

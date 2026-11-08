@@ -17,6 +17,7 @@ public record PurchaseInvoiceResponse(
         /** Items + shipping + customs: what the invoice cost in total. */
         BigDecimal totalUsd,
         String paidFrom,
+        SupplierRef account,
         String notes,
         boolean hasAttachment,
         List<Item> items,

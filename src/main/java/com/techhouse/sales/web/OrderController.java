@@ -3,6 +3,7 @@ package com.techhouse.sales.web;
 import com.techhouse.identity.config.CurrentStore;
 import com.techhouse.sales.application.OrderService;
 import com.techhouse.sales.domain.OrderStatus;
+import com.techhouse.sales.web.dto.DeliverRequest;
 import com.techhouse.sales.web.dto.OrderDetail;
 import com.techhouse.sales.web.dto.OrderRequest;
 import com.techhouse.sales.web.dto.OrderSummary;
@@ -46,8 +47,8 @@ public class OrderController {
 
     @PostMapping("/{id}/deliver")
     public ApiResponse<OrderDetail> deliver(@CurrentStore UUID storeId, @PathVariable UUID id,
-                                            @Valid @RequestBody(required = false) StatusChangeRequest body) {
-        return ApiResponse.ok(service.deliver(storeId, id, note(body)));
+                                            @Valid @RequestBody DeliverRequest body) {
+        return ApiResponse.ok(service.deliver(storeId, id, body.accountId(), body.note()));
     }
 
     @PostMapping("/{id}/return")

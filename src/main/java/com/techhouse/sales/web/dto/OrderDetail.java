@@ -22,6 +22,8 @@ public record OrderDetail(
         BigDecimal deliveryCost,
         String deliveryCostCurrency,
         Ref deliveryCompany,
+        /** The box the money went into (delivered orders). */
+        Ref paymentAccount,
         OrderMoney money,
         String notes,
         Instant orderedAt,

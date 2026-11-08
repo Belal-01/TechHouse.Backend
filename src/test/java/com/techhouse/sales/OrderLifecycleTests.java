@@ -79,6 +79,11 @@ class OrderLifecycleTests {
                 BigDecimal.class, store, currency);
     }
 
+    private BigDecimal box(UUID account, String currency) {
+        return jdbc.queryForObject("select coalesce(sum(amount), 0) from cash_movements where account_id = ? and wallet_currency = ?",
+                BigDecimal.class, account, currency);
+    }
+
     private JsonNode stockOf(UUID product) throws Exception {
         for (JsonNode row : call("GET", "/inventory/stock", null).data()) {
             if (row.path("productId").asString().equals(product.toString())) return row;
@@ -112,7 +117,12 @@ class OrderLifecycleTests {
                 select coalesce(sum(a.quantity * a.unit_cost), 0) from order_item_allocations a
                 join order_items i on i.id = a.order_item_id join orders o on o.id = i.order_id
                 where o.store_id = ? and o.status = 'PENDING'""", BigDecimal.class, store);
-        return wallet("USD").add(wallet("SYP").divide(RATE, 10, RoundingMode.HALF_UP)).add(stock).add(inTransit);
+        BigDecimal advUsd = jdbc.queryForObject("select coalesce(sum(amount), 0) from advance_entries where store_id = ? and currency = 'USD'",
+                BigDecimal.class, store);
+        BigDecimal advSyp = jdbc.queryForObject("select coalesce(sum(amount), 0) from advance_entries where store_id = ? and currency = 'SYP'",
+                BigDecimal.class, store);
+        return wallet("USD").add(wallet("SYP").divide(RATE, 10, RoundingMode.HALF_UP)).add(stock).add(inTransit)
+                .add(advUsd).add(advSyp.divide(RATE, 10, RoundingMode.HALF_UP));
     }
 
     /** Net profit (spec §4): delivered revenue − their FIFO cost − expenses that were not voided. */
@@ -162,8 +172,14 @@ class OrderLifecycleTests {
                 call("POST", "/sales/orders", order("SYP", UUID.randomUUID(), 1, "1", "0", null)).code());
 
         // --- starting point: 1000$ + 500,000 SYP, rate 14,500 (sell)
-        jdbc.update("insert into cash_movements (store_id, wallet_currency, movement_type, amount) values (?, 'USD', 'CAPITAL_IN', 1000)", store);
-        jdbc.update("insert into cash_movements (store_id, wallet_currency, movement_type, amount) values (?, 'SYP', 'CAPITAL_IN', 500000)", store);
+        // new stores get two boxes (default "in hand" + Sham Cash) and the default expense categories
+        JsonNode boxes = call("GET", "/finance/accounts", null).data();
+        assertEquals(2, boxes.size());
+        UUID hand = UUID.fromString(boxes.get(0).path("id").asString());
+        UUID shamCash = UUID.fromString(boxes.get(1).path("id").asString());
+        assertTrue(boxes.get(0).path("isDefault").asBoolean());
+        assertEquals(200, call("POST", "/finance/movements/capital", Map.of("accountId", hand, "currency", "USD", "amount", 1000)).status());
+        assertEquals(200, call("POST", "/finance/movements/capital", Map.of("accountId", hand, "currency", "SYP", "amount", 500000)).status());
         jdbc.update("""
                 insert into exchange_rates (store_id, rate_date, currency_pair, buy_rate, sell_rate, mid_rate, source, status)
                 values (?, (now() at time zone 'Asia/Damascus')::date, 'USD/SYP', 14400, 14500, 14450, 'MANUAL', 'ACTIVE')""", store);
@@ -213,9 +229,12 @@ class OrderLifecycleTests {
         assertEquals(0, new BigDecimal("465000").compareTo(wallet("SYP")));
 
         // --- 5: #1 delivered → SYP 2,553,000; revenue 144$, cost 74$
-        Reply d1 = call("POST", "/sales/orders/" + order1 + "/deliver", Map.of("note", "استلم"));
+        assertEquals("VALIDATION_ERROR", call("POST", "/sales/orders/" + order1 + "/deliver", Map.of("note", "x")).code());
+        Reply d1 = call("POST", "/sales/orders/" + order1 + "/deliver", Map.of("accountId", shamCash, "note", "استلم"));
         assertEquals(200, d1.status(), d1.body().toString());
         assertEquals(0, new BigDecimal("2553000").compareTo(wallet("SYP")));
+        assertEquals(0, new BigDecimal("2088000").compareTo(box(shamCash, "SYP")));   // the money went to Sham Cash
+        assertEquals("شام كاش", d1.data().path("paymentAccount").path("name").asString());
         assertMoney("144.00", d1.data().path("money").path("revenueUsd"));
         assertMoney("74.00", d1.data().path("money").path("cogsUsd"));
         assertMoney("1.38", d1.data().path("money").path("deliveryCostUsd"));
@@ -230,7 +249,7 @@ class OrderLifecycleTests {
         assertEquals(0, stockOf(a).path("inTransit").asInt());
         assertMoney("-1.03", r2.data().path("money").path("profitUsd"));
         // final states are final
-        assertEquals("ORDER_NOT_PENDING", call("POST", "/sales/orders/" + order2 + "/deliver", null).code());
+        assertEquals("ORDER_NOT_PENDING", call("POST", "/sales/orders/" + order2 + "/deliver", Map.of("accountId", hand)).code());
         assertEquals("ORDER_NOT_PENDING", call("POST", "/sales/orders/" + order1 + "/void", null).code());
 
         // --- the invariant: change in net worth == net profit == 67.59$
@@ -252,6 +271,66 @@ class OrderLifecycleTests {
                 Integer.class, order3));
         assertEquals(0, new BigDecimal("67.59").compareTo(netProfit().setScale(2, RoundingMode.HALF_UP)));
         assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0);
+
+        // --- moving money between boxes and currencies changes nothing (exchange at the fixed rate)
+        assertEquals(200, call("POST", "/finance/movements/transfer", Map.of("fromAccountId", shamCash, "toAccountId", hand,
+                "currency", "SYP", "amount", 88000)).status());
+        assertEquals("SAME_ACCOUNT", call("POST", "/finance/movements/transfer", Map.of("fromAccountId", hand, "toAccountId", hand,
+                "currency", "SYP", "amount", 1)).code());
+        Reply exchanged = call("POST", "/finance/movements/exchange", Map.of("fromAccountId", hand, "fromCurrency", "USD",
+                "fromAmount", 100, "toAccountId", hand, "toAmount", 1450000));
+        assertEquals(200, exchanged.status(), exchanged.body().toString());
+        assertEquals(0, new BigDecimal("770").compareTo(box(hand, "USD")));
+        assertEquals(0, new BigDecimal("2000000").compareTo(box(shamCash, "SYP")));
+        assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0);
+
+        // --- a manual expense (own category), then voided: money back, profit back
+        Reply category = call("POST", "/finance/expense-categories", Map.of("name", "إيجار " + run));
+        assertEquals(201, category.status());
+        UUID rentId = UUID.fromString(category.data().path("id").asString());
+        Reply rent = call("POST", "/finance/expenses", Map.of("categoryId", rentId, "amount", 290000, "currency", "SYP",
+                "accountId", hand, "expenseDate", "2026-11-08", "description", "إيجار تشرين"));
+        assertEquals(201, rent.status(), rent.body().toString());
+        assertMoney("20.00", rent.data().path("amountUsd"));                       // 290,000 / 14,500
+        assertMoney("47.59", new tools.jackson.databind.node.DecimalNode(netProfit()));
+        assertEquals("EXPENSE_CATEGORY_IN_USE", call("DELETE", "/finance/expense-categories/" + rentId, null).code());
+        UUID rentExpense = UUID.fromString(rent.data().path("id").asString());
+        assertEquals(200, call("POST", "/finance/expenses/" + rentExpense + "/void", Map.of("note", "خطأ")).status());
+        assertEquals("EXPENSE_ALREADY_VOIDED", call("POST", "/finance/expenses/" + rentExpense + "/void", null).code());
+        assertMoney("67.59", new tools.jackson.databind.node.DecimalNode(netProfit()));
+        JsonNode delivery = call("GET", "/finance/expenses?categoryId=" + call("GET", "/finance/expense-categories", null).data()
+                .valueStream().filter(c -> c.path("system").asBoolean() && c.path("name").asString().equals("توصيل"))
+                .findFirst().orElseThrow().path("id").asString(), null).data();
+        assertEquals(3, delivery.path("totalElements").asInt());                  // 2 kept + 1 voided with its order
+        String keptFee = delivery.path("content").valueStream().filter(e -> e.path("voidedAt").isMissingNode())
+                .findFirst().orElseThrow().path("id").asString();
+        assertEquals("EXPENSE_BELONGS_TO_ORDER", call("POST", "/finance/expenses/" + keptFee + "/void", null).code());
+
+        // --- a manager's advance: not an expense until spent on the shop
+        Reply manager = call("POST", "/finance/people", Map.of("name", "مدير " + run));
+        assertEquals(201, manager.status());
+        String person = "/finance/people/" + manager.data().path("id").asString();
+        assertEquals(200, call("POST", person + "/withdraw", Map.of("accountId", hand, "currency", "SYP", "amount", 100000)).status());
+        assertEquals(0, new BigDecimal("100000").compareTo(call("GET", person, null).data().path("owedSyp").decimalValue()));
+        assertMoney("67.59", new tools.jackson.databind.node.DecimalNode(netProfit()));   // profit untouched
+        assertEquals(200, call("POST", person + "/return", Map.of("accountId", shamCash, "currency", "SYP", "amount", 40000)).status());
+        Reply tooMuch = call("POST", person + "/return", Map.of("accountId", hand, "currency", "SYP", "amount", 70000));
+        assertEquals("ADVANCE_EXCEEDS_BALANCE", tooMuch.code());
+        UUID packaging = UUID.fromString(call("GET", "/finance/expense-categories", null).data().valueStream()
+                .filter(c -> c.path("name").asString().equals("تغليف")).findFirst().orElseThrow().path("id").asString());
+        Reply spent = call("POST", person + "/spend", Map.of("currency", "SYP", "amount", 14500, "categoryId", packaging,
+                "expenseDate", "2026-11-08", "description", "علب"));
+        assertEquals(200, spent.status(), spent.body().toString());
+        assertEquals(0, new BigDecimal("45500").compareTo(spent.data().path("owedSyp").decimalValue()));
+        assertMoney("66.59", new tools.jackson.databind.node.DecimalNode(netProfit()));   // 1$ of packaging
+        assertEquals(3, call("GET", person + "/entries", null).data().size());
+        assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0,
+                "after advances: net worth changed by " + netWorth().subtract(startWorth) + ", profit " + netProfit());
+
+        // the ledger lists every movement with what caused it
+        JsonNode ledgerPage = call("GET", "/finance/movements?accountId=" + shamCash, null).data();
+        assertTrue(ledgerPage.path("content").valueStream().anyMatch(m -> m.path("type").asString().equals("SALE_PAYMENT")
+                && m.path("reference").path("label").asString().startsWith("SO-")));
 
         // --- listing and search
         assertEquals(1, call("GET", "/sales/orders?status=DELIVERED", null).data().path("totalElements").asInt());

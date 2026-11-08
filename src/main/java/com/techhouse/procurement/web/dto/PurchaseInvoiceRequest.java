@@ -21,6 +21,8 @@ public record PurchaseInvoiceRequest(
         @DecimalMin("0") @DecimalMax("100000000") BigDecimal customsCostUsd,
         /** INCOME (paid from the shop's cash) or EXTERNAL_CAPITAL (the owner put in new money for it). */
         @NotNull @Pattern(regexp = "INCOME|EXTERNAL_CAPITAL") String paidFrom,
+        /** The box that pays (its USD balance); the default box when omitted. */
+        UUID accountId,
         @Size(max = 5000) String notes,
         @NotEmpty @Size(max = 200) List<@Valid InvoiceItemRequest> items
 ) {}

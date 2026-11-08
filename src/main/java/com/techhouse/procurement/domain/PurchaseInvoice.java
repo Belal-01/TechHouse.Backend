@@ -41,4 +41,8 @@ public class PurchaseInvoice extends BaseEntity {
     private String paidFrom;
 
     private String notes;
+
+    /** The box the invoice was paid from. */
+    @Column(name = "account_id", updatable = false)
+    private UUID accountId;
 }

@@ -2,7 +2,9 @@ package com.techhouse.procurement.application;
 
 import com.techhouse.catalog.domain.Product;
 import com.techhouse.catalog.persistence.ProductRepository;
+import com.techhouse.finance.application.CashAccountService;
 import com.techhouse.finance.application.LedgerService;
+import com.techhouse.finance.domain.CashAccount;
 import com.techhouse.inventory.domain.InventoryLot;
 import com.techhouse.procurement.domain.InvoiceItem;
 import com.techhouse.procurement.domain.PurchaseInvoice;
@@ -56,6 +58,7 @@ public class PurchaseInvoiceService {
     private final SupplierRepository supplierRepository;
     private final ProductRepository productRepository;
     private final LedgerService ledger;
+    private final CashAccountService accounts;
     private final EntityManager em;
 
     // ---- Queries ---------------------------------------------------------------------
@@ -99,6 +102,7 @@ public class PurchaseInvoiceService {
             }
         }
         Map<UUID, Product> products = loadProducts(storeId, request.items());
+        CashAccount account = accounts.resolve(storeId, request.accountId(), "accountId");
 
         BigDecimal shipping = money(request.shippingCostUsd());
         BigDecimal customs = money(request.customsCostUsd());
@@ -111,6 +115,7 @@ public class PurchaseInvoiceService {
         invoice.setShippingCostUsd(shipping);
         invoice.setCustomsCostUsd(customs);
         invoice.setPaidFrom(request.paidFrom());
+        invoice.setAccountId(account.getId());
         invoice.setNotes(request.notes() == null || request.notes().isBlank() ? null : request.notes().trim());
         em.persist(invoice);
 
@@ -145,11 +150,11 @@ public class PurchaseInvoiceService {
         BigDecimal total = itemsTotal(request.items()).add(shipping).add(customs);
         if (Objects.equals(request.paidFrom(), "EXTERNAL_CAPITAL")) {
             // New money from the owner: in and straight out again, so cash is unchanged.
-            ledger.record(storeId, WALLET, "CAPITAL_IN", total, "PURCHASE_INVOICE", invoice.getId(),
-                    "Capital for " + invoice.getInvoiceNumber());
+            ledger.record(LedgerService.Entry.of(storeId, account.getId(), WALLET, "CAPITAL_IN", total)
+                    .ref("PURCHASE_INVOICE", invoice.getId()).note("رأس مال للفاتورة " + invoice.getInvoiceNumber()));
         }
-        ledger.record(storeId, WALLET, "PURCHASE_PAYMENT", total.negate(), "PURCHASE_INVOICE", invoice.getId(),
-                "Payment for " + invoice.getInvoiceNumber());
+        ledger.record(LedgerService.Entry.of(storeId, account.getId(), WALLET, "PURCHASE_PAYMENT", total.negate())
+                .ref("PURCHASE_INVOICE", invoice.getId()).note("دفع الفاتورة " + invoice.getInvoiceNumber()));
 
         em.flush();
         return toResponse(invoice);
@@ -233,6 +238,13 @@ public class PurchaseInvoiceService {
         return s == null ? null : new PurchaseInvoiceResponse.SupplierRef(s.getId(), s.getName());
     }
 
+    private PurchaseInvoiceResponse.SupplierRef accountRef(UUID accountId) {
+        if (accountId == null) return null;
+        String name = (String) em.createNativeQuery("select name from cash_accounts where id = :id")
+                .setParameter("id", accountId).getSingleResult();
+        return new PurchaseInvoiceResponse.SupplierRef(accountId, name);
+    }
+
     private PurchaseInvoiceResponse toResponse(PurchaseInvoice inv) {
         List<InvoiceItem> lines = itemRepository.findByInvoiceIdIn(List.of(inv.getId()));
         Map<UUID, Product> products = new HashMap<>();
@@ -249,7 +261,8 @@ public class PurchaseInvoiceService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new PurchaseInvoiceResponse(inv.getId(), inv.getInvoiceNumber(),
                 supplierRef(suppliersFor(List.of(inv)), inv), inv.getInvoiceDate(), inv.getShippingCostUsd(),
-                inv.getCustomsCostUsd(), itemsTotal, total(inv, lines), inv.getPaidFrom(), inv.getNotes(),
+                inv.getCustomsCostUsd(), itemsTotal, total(inv, lines), inv.getPaidFrom(), accountRef(inv.getAccountId()),
+                inv.getNotes(),
                 !fileRepository.findInvoiceIdsWithFile(List.of(inv.getId())).isEmpty(), items, inv.getVersion(),
                 inv.getCreatedAt());
     }
