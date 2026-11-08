@@ -12,5 +12,6 @@ public record PurchaseInvoiceSummary(
         int itemCount,
         BigDecimal totalUsd,
         String paidFrom,
-        boolean hasAttachment
+        boolean hasAttachment,
+        boolean voided
 ) {}

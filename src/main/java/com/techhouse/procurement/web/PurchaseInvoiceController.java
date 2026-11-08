@@ -49,6 +49,12 @@ public class PurchaseInvoiceController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(invoiceService.create(storeId, request)));
     }
 
+    @PostMapping("/{id}/void")
+    public ApiResponse<PurchaseInvoiceResponse> voidInvoice(@CurrentStore UUID storeId, @PathVariable UUID id,
+                                                            @Valid @RequestBody(required = false) com.techhouse.procurement.web.dto.VoidInvoiceRequest body) {
+        return ApiResponse.ok(invoiceService.voidInvoice(storeId, id, body == null ? null : body.note()));
+    }
+
     @PostMapping(value = "/{id}/attachment", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Void> uploadAttachment(@CurrentStore UUID storeId, @PathVariable UUID id,
                                                  @RequestParam("file") MultipartFile file) {

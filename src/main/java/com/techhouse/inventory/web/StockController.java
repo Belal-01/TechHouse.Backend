@@ -23,4 +23,10 @@ public class StockController {
     public ApiResponse<List<StockItem>> list(@CurrentStore UUID storeId) {
         return ApiResponse.ok(stockService.list(storeId));
     }
+
+    @GetMapping("/{productId}")
+    public ApiResponse<com.techhouse.inventory.web.dto.ProductStock> product(@CurrentStore UUID storeId,
+                                                                             @org.springframework.web.bind.annotation.PathVariable UUID productId) {
+        return ApiResponse.ok(stockService.product(storeId, productId));
+    }
 }

@@ -8,6 +8,8 @@ import java.util.UUID;
  * @param valueUsd       their landed cost
  * @param inTransit      units out with customers on pending orders
  * @param inTransitValueUsd their landed cost
+ * @param stocked        the product was bought at least once (has lots)
+ * @param low            stocked, for sale, and fewer than the low-stock threshold left
  */
 public record StockItem(
         UUID productId,
@@ -18,5 +20,7 @@ public record StockItem(
         int available,
         BigDecimal valueUsd,
         int inTransit,
-        BigDecimal inTransitValueUsd
+        BigDecimal inTransitValueUsd,
+        boolean stocked,
+        boolean low
 ) {}

@@ -244,6 +244,8 @@ public class DashboardService {
         List<LowStock> low = jdbc.query("""
                 select p.id, p.name, coalesce(sum(l.qty_left), 0)
                 from products p join inventory_lots l on l.product_id = p.id
+                join invoice_items ii on ii.id = l.invoice_item_id
+                join purchase_invoices pi on pi.id = ii.invoice_id and pi.voided_at is null
                 where p.store_id = ? and p.deleted_at is null and p.active
                 group by p.id, p.name having coalesce(sum(l.qty_left), 0) < ?
                 order by 3, p.name""",

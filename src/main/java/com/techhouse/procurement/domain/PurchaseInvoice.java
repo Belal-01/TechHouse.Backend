@@ -42,6 +42,13 @@ public class PurchaseInvoice extends BaseEntity {
 
     private String notes;
 
+    /** Set when the invoice was voided (entered by mistake); it stays for the record. */
+    @Column(name = "voided_at")
+    private java.time.Instant voidedAt;
+
+    @Column(name = "void_note")
+    private String voidNote;
+
     /** The box the invoice was paid from. */
     @Column(name = "account_id", updatable = false)
     private UUID accountId;

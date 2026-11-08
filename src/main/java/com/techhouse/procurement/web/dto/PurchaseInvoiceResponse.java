@@ -22,7 +22,11 @@ public record PurchaseInvoiceResponse(
         boolean hasAttachment,
         List<Item> items,
         int version,
-        Instant createdAt
+        Instant createdAt,
+        Instant voidedAt,
+        String voidNote,
+        /** True when it can still be voided: not voided, and none of its units sold or on the way. */
+        boolean voidable
 ) {
     public record SupplierRef(UUID id, String name) {}
 

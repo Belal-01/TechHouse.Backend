@@ -79,7 +79,7 @@ public class PurchaseInvoiceService {
             List<InvoiceItem> lines = items.getOrDefault(inv.getId(), List.of());
             return new PurchaseInvoiceSummary(inv.getId(), inv.getInvoiceNumber(), supplierRef(suppliers, inv),
                     inv.getInvoiceDate(), lines.size(), total(inv, lines), inv.getPaidFrom(),
-                    withFile.contains(inv.getId()));
+                    withFile.contains(inv.getId()), inv.getVoidedAt() != null);
         }));
     }
 
@@ -160,7 +160,59 @@ public class PurchaseInvoiceService {
         return toResponse(invoice);
     }
 
+    /**
+     * Undo an invoice entered by mistake. Only while all its units are still in the warehouse (none sold or on the
+     * way): the stock leaves, and every ledger entry it made is reversed with an opposite entry in the same box.
+     */
+    @Transactional
+    public PurchaseInvoiceResponse voidInvoice(UUID storeId, UUID id, String note) {
+        PurchaseInvoice invoice = em.find(PurchaseInvoice.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (invoice == null || !invoice.getStoreId().equals(storeId)) {
+            throw new ResourceNotFoundException("INVOICE_NOT_FOUND", "Purchase invoice", id);
+        }
+        if (invoice.getVoidedAt() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "INVOICE_ALREADY_VOIDED", "The invoice is already voided");
+        }
+        // Lock its lots so no order can take from them while we check and empty them.
+        em.createNativeQuery("""
+                select l.id from inventory_lots l join invoice_items i on i.id = l.invoice_item_id
+                where i.invoice_id = :invoice for update of l""").setParameter("invoice", id).getResultList();
+        int used = unitsUsed(id);
+        if (used > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "INVOICE_STOCK_USED",
+                    used + " units of this invoice were already sold or are on the way");
+        }
+        em.createNativeQuery("""
+                update inventory_lots set qty_left = 0
+                where invoice_item_id in (select id from invoice_items where invoice_id = :invoice)""")
+                .setParameter("invoice", id).executeUpdate();
+
+        String reason = "إلغاء الفاتورة " + invoice.getInvoiceNumber();
+        @SuppressWarnings("unchecked")
+        List<Object[]> entries = em.createNativeQuery("""
+                select account_id, wallet_currency, amount from cash_movements
+                where store_id = :store and reference_type = 'PURCHASE_INVOICE' and reference_id = :invoice""")
+                .setParameter("store", storeId).setParameter("invoice", id).getResultList();
+        for (Object[] e : entries) {
+            ledger.record(LedgerService.Entry.of(storeId, (UUID) e[0], (String) e[1], "ADJUSTMENT", ((BigDecimal) e[2]).negate())
+                    .ref("PURCHASE_INVOICE", id).note(reason));
+        }
+        invoice.setVoidedAt(java.time.Instant.now());
+        invoice.setVoidNote(note == null || note.isBlank() ? null : note.trim());
+        em.flush();
+        return toResponse(invoice);
+    }
+
     // ---- Internals -------------------------------------------------------------------
+
+    /** Units of this invoice no longer in the warehouse (sold, or taken by a pending order). */
+    private int unitsUsed(UUID invoiceId) {
+        Number n = (Number) em.createNativeQuery("""
+                select coalesce(sum(l.qty_in - l.qty_left), 0) from inventory_lots l
+                join invoice_items i on i.id = l.invoice_item_id where i.invoice_id = :invoice""")
+                .setParameter("invoice", invoiceId).getSingleResult();
+        return n.intValue();
+    }
 
     PurchaseInvoice find(UUID storeId, UUID id) {
         return invoiceRepository.findByIdAndStoreId(id, storeId)
@@ -264,6 +316,7 @@ public class PurchaseInvoiceService {
                 inv.getCustomsCostUsd(), itemsTotal, total(inv, lines), inv.getPaidFrom(), accountRef(inv.getAccountId()),
                 inv.getNotes(),
                 !fileRepository.findInvoiceIdsWithFile(List.of(inv.getId())).isEmpty(), items, inv.getVersion(),
-                inv.getCreatedAt());
+                inv.getCreatedAt(), inv.getVoidedAt(), inv.getVoidNote(),
+                inv.getVoidedAt() == null && unitsUsed(inv.getId()) == 0);
     }
 }

@@ -327,6 +327,20 @@ class OrderLifecycleTests {
         assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0,
                 "after advances: net worth changed by " + netWorth().subtract(startWorth) + ", profit " + netProfit());
 
+        // --- inventory screen: lots in FIFO order with what is left, and the orders that took from them
+        Reply productStock = call("GET", "/inventory/stock/" + a, null);
+        assertEquals(200, productStock.status(), productStock.body().toString());
+        JsonNode lots = productStock.data().path("lots");
+        assertEquals(2, lots.size());
+        assertEquals(0, lots.get(0).path("qtyLeft").asInt());                       // the 6$ lot is used up
+        assertEquals(8, lots.get(1).path("qtyLeft").asInt());
+        assertMoney("7.00", lots.get(1).path("unitCost"));
+        assertTrue(lots.get(0).path("invoiceNumber").asString().startsWith("PI-"));
+        assertEquals(3, productStock.data().path("recentOrders").size());
+        assertTrue(productStock.data().path("summary").path("stocked").asBoolean());
+        assertEquals(false, productStock.data().path("summary").path("low").asBoolean());
+        assertEquals(404, call("GET", "/inventory/stock/" + UUID.randomUUID(), null).status());
+
         // --- the dashboard and the wealth page tell the same story as the books
         String today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Damascus")).toString();
         Reply dash = call("GET", "/dashboard?from=" + today + "&to=" + today, null);

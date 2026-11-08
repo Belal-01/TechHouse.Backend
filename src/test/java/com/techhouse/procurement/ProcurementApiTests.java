@@ -72,6 +72,11 @@ class ProcurementApiTests {
         return send(b.build());
     }
 
+    /** Same as {@link #call} but under /api/v1/admin/sales. */
+    private Reply callSales(String method, String path, Object body) throws Exception {
+        return call(method, "/api/v1/admin/sales" + path, body);
+    }
+
     private Reply upload(String path, byte[] data, String filename) throws Exception {
         String boundary = "----test" + RUN;
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -252,6 +257,35 @@ class ProcurementApiTests {
         assertEquals("Shenzhen Co " + RUN, row.path("supplier").path("name").asString());
         assertTrue(call("GET", inv, null).data().path("totalElements").asInt() >= 3);
 
+        // --- voiding an invoice entered by mistake: stock out, payment reversed, kept for the record
+        Reply mistake = call("POST", inv, invoice(null, "20", "INCOME", List.of(line(c, 5, "10"))));
+        UUID mistakeId = UUID.fromString(mistake.data().path("id").asString());
+        assertTrue(mistake.data().path("voidable").asBoolean());
+        assertEquals(0, new BigDecimal("-70").compareTo(ledgerSum(mistakeId)));
+        Reply voided = call("POST", inv + "/" + mistakeId + "/void", Map.of("note", "أُدخلت مرتين"));
+        assertEquals(200, voided.status(), voided.body().toString());
+        assertTrue(voided.data().path("voidedAt").isString());
+        assertEquals("أُدخلت مرتين", voided.data().path("voidNote").asString());
+        assertEquals(false, voided.data().path("voidable").asBoolean());
+        assertEquals(0, BigDecimal.ZERO.compareTo(ledgerSum(mistakeId)));          // the 70$ is back in the box
+        assertEquals(0, jdbc.queryForObject("""
+                select coalesce(sum(l.qty_left), 0) from inventory_lots l join invoice_items i on i.id = l.invoice_item_id
+                where i.invoice_id = ?""", Integer.class, mistakeId));
+        assertEquals("INVOICE_ALREADY_VOIDED", call("POST", inv + "/" + mistakeId + "/void", null).code());
+        assertTrue(call("GET", inv, null).data().path("content").valueStream()
+                .anyMatch(r -> r.path("id").asString().equals(mistakeId.toString()) && r.path("voided").asBoolean()));
+
+        // an invoice whose units were taken by an order can't be voided... until that order is undone
+        Reply order = callSales("POST", "/orders", Map.of("customerName", "test", "currency", "USD",
+                "items", List.of(Map.of("productId", a, "quantity", 1, "unitPrice", 50))));
+        assertEquals(201, order.status(), order.body().toString());
+        assertEquals(false, call("GET", inv + "/" + invoiceId, null).data().path("voidable").asBoolean());
+        Reply refused = call("POST", inv + "/" + invoiceId + "/void", null);
+        assertEquals(409, refused.status());
+        assertEquals("INVOICE_STOCK_USED", refused.code());
+        assertEquals(200, callSales("POST", "/orders/" + order.data().path("id").asString() + "/void", null).status());
+        assertTrue(call("GET", inv + "/" + invoiceId, null).data().path("voidable").asBoolean());
+
         // --- a supplier with invoices can be deactivated but not deleted
         assertEquals("SUPPLIER_IN_USE", call("DELETE", base + "/" + supplierId, null).code());
         int version = call("GET", base + "/" + supplierId, null).data().path("version").asInt();
@@ -262,6 +296,9 @@ class ProcurementApiTests {
         assertEquals(204, call("DELETE", base + "/" + lonely.data().path("id").asString(), null).status());
 
         // --- cleanup (the ledger is append-only, so its test rows stay)
+        jdbc.update("delete from order_status_history where order_id in (select order_id from order_items where product_id in (?, ?, ?))", a, b, c);
+        jdbc.update("delete from order_item_allocations where order_item_id in (select id from order_items where product_id in (?, ?, ?))", a, b, c);
+        jdbc.update("delete from orders where id in (select order_id from order_items where product_id in (?, ?, ?))", a, b, c);
         jdbc.update("delete from inventory_lots where product_id in (?, ?, ?)", a, b, c);
         jdbc.update("delete from purchase_invoices where id in (select invoice_id from invoice_items where product_id in (?, ?, ?))", a, b, c);
         jdbc.update("delete from invoice_items where product_id in (?, ?, ?)", a, b, c);
