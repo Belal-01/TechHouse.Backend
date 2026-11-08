@@ -14,7 +14,12 @@ public record ExchangeRateProperties(
         String cron,
         boolean fetchOnStartup,
         Duration retryBackoff,
-        BigDecimal maxJumpPercent
+        BigDecimal maxJumpPercent,
+        /**
+         * The provider's figures are divided by this to get new Syrian pounds (new SYP = old / 100).
+         * SPToday still quotes old pounds; set it to 1 if it switches to the new pound.
+         */
+        BigDecimal providerSypDivisor
 ) {
     public boolean configured() {
         return apiKey != null && !apiKey.isBlank() && apiUrl != null && !apiUrl.isBlank();

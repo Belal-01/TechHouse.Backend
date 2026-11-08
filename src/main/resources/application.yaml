@@ -62,3 +62,7 @@ app:
     retry-backoff: 2s
     # A new rate this far from the last approved one waits for review instead of being used.
     max-jump-percent: 20
+    # The app works in the NEW Syrian pound (two zeros removed: 100 instead of 10,000). SPToday quotes the old pound,
+    # so its figures are divided by 100. Set RATE_API_SYP_DIVISOR=1 if the provider starts quoting new pounds
+    # (the 20% jump guard would hold a wrong rate for review either way).
+    provider-syp-divisor: ${RATE_API_SYP_DIVISOR:100}

@@ -163,14 +163,14 @@ class ExchangeRateApiTests {
         assertTrue(empty.path("stale").asBoolean());
         assertTrue(empty.path("apiUsage").path("configured").asBoolean());
 
-        // --- refresh: Damascus USD, mid = (14450 + 14525) / 2
+        // --- refresh: the provider quotes OLD pounds; stored in NEW pounds (÷100): mid = (144.5 + 145.25) / 2
         BODY.set(overview(14450, 14525));
         int usedBefore = used();
         Reply refreshed = call("POST", "/refresh", null);
         assertEquals(200, refreshed.status(), refreshed.body().toString());
         JsonNode current = refreshed.data().path("current");
-        assertEquals(0, new BigDecimal("14487.5").compareTo(dec(current.path("midRate"))));
-        assertEquals(0, new BigDecimal("14450").compareTo(dec(current.path("buyRate"))));
+        assertEquals(0, new BigDecimal("144.875").compareTo(dec(current.path("midRate"))));
+        assertEquals(0, new BigDecimal("144.5").compareTo(dec(current.path("buyRate"))));
         assertEquals("API", current.path("source").asString());
         assertEquals("ACTIVE", current.path("status").asString());
         assertFalse(refreshed.data().path("stale").asBoolean());
@@ -183,14 +183,14 @@ class ExchangeRateApiTests {
         BODY.set(overview(14500, 14600));
         JsonNode moved = call("POST", "/refresh", null).data().path("current");
         assertEquals(todayId.toString(), moved.path("id").asString());
-        assertEquals(0, new BigDecimal("14550").compareTo(dec(moved.path("midRate"))));
+        assertEquals(0, new BigDecimal("145.5").compareTo(dec(moved.path("midRate"))));
 
         // --- a jump over 20% in the sell rate (used for sales) waits for review; the rate in use does not change
         BODY.set(overview(20000, 20100));
         JsonNode jumped = call("POST", "/refresh", null).data();
-        assertEquals(0, new BigDecimal("14550").compareTo(dec(jumped.path("current").path("midRate"))));
+        assertEquals(0, new BigDecimal("145.5").compareTo(dec(jumped.path("current").path("midRate"))));
         assertEquals("PENDING_REVIEW", jumped.path("pendingReview").path("status").asString());
-        assertEquals(0, new BigDecimal("20050").compareTo(dec(jumped.path("pendingReview").path("midRate"))));
+        assertEquals(0, new BigDecimal("200.5").compareTo(dec(jumped.path("pendingReview").path("midRate"))));
         UUID pendingId = UUID.fromString(jumped.path("pendingReview").path("id").asString());
         assertEquals("RATE_NOT_PENDING", call("POST", "/" + todayId + "/approve", null).code());
 
@@ -198,7 +198,7 @@ class ExchangeRateApiTests {
         Reply approved = call("POST", "/" + pendingId + "/approve", null);
         assertEquals(200, approved.status());
         assertEquals(todayId.toString(), approved.data().path("id").asString());
-        assertEquals(0, new BigDecimal("20050").compareTo(dec(approved.data().path("midRate"))));
+        assertEquals(0, new BigDecimal("200.5").compareTo(dec(approved.data().path("midRate"))));
         JsonNode afterApprove = call("GET", "/current", null).data();
         assertTrue(afterApprove.path("pendingReview").isMissingNode() || afterApprove.path("pendingReview").isNull());
         assertEquals(404, call("POST", "/" + pendingId + "/approve", null).status());
@@ -209,21 +209,21 @@ class ExchangeRateApiTests {
         BODY.set(overview(20100, 20200));
         JsonNode settled = call("POST", "/refresh", null).data();
         assertTrue(settled.path("pendingReview").isMissingNode() || settled.path("pendingReview").isNull());
-        assertEquals(0, new BigDecimal("20150").compareTo(dec(settled.path("current").path("midRate"))));
+        assertEquals(0, new BigDecimal("201.5").compareTo(dec(settled.path("current").path("midRate"))));
 
         // only the sell rate is guarded: a big move in the buy rate alone is applied directly
         BODY.set(overview(16000, 20300));
         JsonNode buyMoved = call("POST", "/refresh", null).data();
         assertTrue(buyMoved.path("pendingReview").isMissingNode() || buyMoved.path("pendingReview").isNull());
-        assertEquals(0, new BigDecimal("20300").compareTo(dec(buyMoved.path("current").path("sellRate"))));
+        assertEquals(0, new BigDecimal("203").compareTo(dec(buyMoved.path("current").path("sellRate"))));
 
         // --- manual rate: validated, replaces today's rate, and the schedule leaves it alone
         assertEquals("RATE_SELL_BELOW_BUY", call("PUT", "/today", Map.of("buyRate", 15000, "sellRate", 14000)).code());
         assertEquals("VALIDATION_ERROR", call("PUT", "/today", Map.of("buyRate", 0, "sellRate", 14000)).code());
-        Reply manual = call("PUT", "/today", Map.of("buyRate", 14800, "sellRate", 14900));
+        Reply manual = call("PUT", "/today", Map.of("buyRate", 148, "sellRate", 149));
         assertEquals(200, manual.status());
         assertEquals("MANUAL", manual.data().path("source").asString());
-        assertEquals(0, new BigDecimal("14850").compareTo(dec(manual.data().path("midRate"))));
+        assertEquals(0, new BigDecimal("148.5").compareTo(dec(manual.data().path("midRate"))));
         assertEquals(todayId.toString(), manual.data().path("id").asString());
 
         // --- provider down: 3 attempts, a clear error, and the saved rate stays in use
@@ -235,7 +235,7 @@ class ExchangeRateApiTests {
         assertEquals("RATE_FETCH_FAILED", failed.code());
         assertEquals(hits + 3, HITS.get());
         assertEquals(before + 3, used());
-        assertEquals(0, new BigDecimal("14850").compareTo(dec(call("GET", "/current", null).data().path("current").path("midRate"))));
+        assertEquals(0, new BigDecimal("148.5").compareTo(dec(call("GET", "/current", null).data().path("current").path("midRate"))));
         STATUS.set(200);
 
         // provider says ok=false / no USD for the city

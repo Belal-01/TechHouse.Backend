@@ -67,8 +67,10 @@ public class SpTodayRateProvider {
             if (c.isMissingNode() || !c.path("buy").isNumber() || !c.path("sell").isNumber()) {
                 throw new RateFetchException("No USD rate for city " + URLEncoder.encode(city, StandardCharsets.UTF_8));
             }
-            BigDecimal buy = c.path("buy").decimalValue();
-            BigDecimal sell = c.path("sell").decimalValue();
+            // Old Syrian pounds from the provider → new pounds (see app.exchange-rate.provider-syp-divisor).
+            BigDecimal divisor = properties.providerSypDivisor() == null ? BigDecimal.ONE : properties.providerSypDivisor();
+            BigDecimal buy = c.path("buy").decimalValue().divide(divisor, 4, java.math.RoundingMode.HALF_UP);
+            BigDecimal sell = c.path("sell").decimalValue().divide(divisor, 4, java.math.RoundingMode.HALF_UP);
             if (buy.signum() <= 0 || sell.compareTo(buy) < 0) {
                 throw new RateFetchException("Invalid rate " + buy + "/" + sell);
             }
