@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> {
 
     List<InvoiceItem> findByInvoiceIdIn(Collection<UUID> invoiceIds);
+
+    List<InvoiceItem> findByInvoiceIdOrderByPositionAscIdAsc(UUID invoiceId);
 }

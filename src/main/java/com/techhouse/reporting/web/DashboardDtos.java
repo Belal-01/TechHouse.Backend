@@ -51,11 +51,17 @@ public final class DashboardDtos {
     public record Rate(BigDecimal sellRate, LocalDate rateDate, boolean stale, boolean pendingReview) {}
 
     /** Everything the shop owns, in USD, and where it sits. */
-    public record Wealth(Totals totals, List<Account> accounts, List<Stock> stock, List<Advance> advances, Rate rate) {
+    public record Wealth(Totals totals, List<Account> accounts, List<Stock> stock, List<Incoming> incoming,
+                         List<Advance> advances, Rate rate) {
 
         /** @param sypExcluded true when there is no rate, so SYP amounts could not be counted */
-        public record Totals(BigDecimal cashUsd, BigDecimal inventoryUsd, BigDecimal inTransitUsd, BigDecimal advancesUsd,
-                             BigDecimal totalUsd, boolean sypExcluded) {}
+        /** @param incomingUsd goods bought and paid, still on their way (invoices not received yet) */
+        public record Totals(BigDecimal cashUsd, BigDecimal inventoryUsd, BigDecimal inTransitUsd, BigDecimal incomingUsd,
+                             BigDecimal advancesUsd, BigDecimal totalUsd, boolean sypExcluded) {}
+
+        /** An invoice on its way: what it cost so far (goods + costs paid). */
+        public record Incoming(UUID invoiceId, String invoiceNumber, java.time.LocalDate invoiceDate, String supplier,
+                               int units, BigDecimal valueUsd) {}
 
         public record Account(UUID id, String name, BigDecimal usd, BigDecimal syp, BigDecimal valueUsd) {}
 

@@ -48,12 +48,16 @@ public class AdvanceService {
                 rs -> {
                     owed.put(rs.getString(1) + rs.getString(2), rs.getBigDecimal(3));
                 }, storeId);
-        return em.createQuery("select p from StaffPerson p where p.storeId = :store order by p.name", StaffPerson.class)
-                .setParameter("store", storeId).getResultList().stream()
-                .map(p -> new AdvanceDtos.PersonResponse(p.getId(), p.getName(), p.getPhone(), p.isActive(),
-                        owed.getOrDefault(p.getId() + "USD", BigDecimal.ZERO), owed.getOrDefault(p.getId() + "SYP", BigDecimal.ZERO),
-                        p.getVersion()))
-                .toList();
+        return jdbc.query("""
+                select id, name, phone, active, version, partner_kind, partner_id
+                from v_advance_people where store_id = ? order by name, id""",
+                (rs, row) -> {
+                    UUID id = rs.getObject("id", UUID.class);
+                    return new AdvanceDtos.PersonResponse(id, rs.getString("name"), rs.getString("phone"),
+                            rs.getBoolean("active"), owed.getOrDefault(id + "USD", BigDecimal.ZERO),
+                            owed.getOrDefault(id + "SYP", BigDecimal.ZERO), rs.getInt("version"),
+                            rs.getString("partner_kind"), rs.getObject("partner_id", UUID.class));
+                }, storeId);
     }
 
     @Transactional
@@ -70,7 +74,10 @@ public class AdvanceService {
 
     @Transactional
     public AdvanceDtos.PersonResponse updatePerson(UUID storeId, UUID id, AdvanceDtos.PersonRequest r) {
-        StaffPerson p = find(storeId, id, false);
+        StaffPerson p = find(storeId, id, true);
+        if (person(storeId, id).partnerKind() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "PERSON_MANAGED_AS_PARTNER", "Edit this profile in partners");
+        }
         if (r.version() == null || !r.version().equals(p.getVersion())) {
             throw new BusinessException(HttpStatus.CONFLICT, "CONCURRENT_MODIFICATION", "The record was modified by someone else");
         }
@@ -92,7 +99,7 @@ public class AdvanceService {
     @Transactional
     public AdvanceDtos.PersonResponse withdraw(UUID storeId, UUID personId, AdvanceDtos.CashRequest r) {
         StaffPerson p = find(storeId, personId, true);
-        if (!p.isActive()) throw new BusinessException(HttpStatus.CONFLICT, "PERSON_INACTIVE", "This person is inactive");
+        if (!person(storeId, personId).active()) throw new BusinessException(HttpStatus.CONFLICT, "PERSON_INACTIVE", "This person is inactive");
         CashAccount account = accounts.resolve(storeId, r.accountId(), "accountId");
         BigDecimal amount = scale(r.amount());
         entry(storeId, p, AdvanceEntry.Kind.WITHDRAWAL, r.currency(), amount, account.getId(), null, r.note());
@@ -183,7 +190,7 @@ public class AdvanceService {
     }
 
     private void requireUniqueName(UUID storeId, String name, UUID exceptId) {
-        Long n = jdbc.queryForObject("select count(*) from staff_people where store_id = ? and lower(name) = lower(?) and id <> ?",
+        Long n = jdbc.queryForObject("select count(*) from v_advance_people where store_id = ? and lower(name) = lower(?) and id <> ?",
                 Long.class, storeId, name, exceptId == null ? new UUID(0, 0) : exceptId);
         if (n != null && n > 0) {
             throw BusinessException.onField(HttpStatus.CONFLICT, "PERSON_NAME_EXISTS", "name", "A person with this name exists");

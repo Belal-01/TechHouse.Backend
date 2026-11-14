@@ -4,7 +4,10 @@ import com.techhouse.identity.config.CurrentStore;
 import com.techhouse.procurement.application.PurchaseInvoiceFileService;
 import com.techhouse.procurement.application.PurchaseInvoiceService;
 import com.techhouse.procurement.domain.PurchaseInvoiceFile;
+import com.techhouse.procurement.web.dto.AssignFundingRequest;
+import com.techhouse.procurement.web.dto.InvoiceCostRequest;
 import com.techhouse.procurement.web.dto.PurchaseInvoiceRequest;
+import com.techhouse.procurement.web.dto.ReceiveInvoiceRequest;
 import com.techhouse.procurement.web.dto.PurchaseInvoiceResponse;
 import com.techhouse.procurement.web.dto.PurchaseInvoiceSummary;
 import com.techhouse.shared.web.ApiResponse;
@@ -33,9 +36,10 @@ public class PurchaseInvoiceController {
     @GetMapping
     public ApiResponse<PageResponse<PurchaseInvoiceSummary>> list(@CurrentStore UUID storeId,
                                                                   @RequestParam(required = false) UUID supplierId,
+                                                                  @RequestParam(required = false) String status,
                                                                   @RequestParam(defaultValue = "0") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(invoiceService.list(storeId, supplierId, page, size));
+        return ApiResponse.ok(invoiceService.list(storeId, supplierId, status, page, size));
     }
 
     @GetMapping("/{id}")
@@ -47,6 +51,31 @@ public class PurchaseInvoiceController {
     public ResponseEntity<ApiResponse<PurchaseInvoiceResponse>> create(@CurrentStore UUID storeId,
                                                                        @Valid @RequestBody PurchaseInvoiceRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(invoiceService.create(storeId, request)));
+    }
+
+    @PostMapping("/{id}/receive")
+    public ApiResponse<PurchaseInvoiceResponse> receive(@CurrentStore UUID storeId, @PathVariable UUID id,
+                                                        @Valid @RequestBody(required = false) ReceiveInvoiceRequest body) {
+        return ApiResponse.ok(invoiceService.receive(storeId, id, body));
+    }
+
+    @PostMapping("/{id}/costs")
+    public ApiResponse<PurchaseInvoiceResponse> addCost(@CurrentStore UUID storeId, @PathVariable UUID id,
+                                                        @Valid @RequestBody InvoiceCostRequest body) {
+        return ApiResponse.ok(invoiceService.addCost(storeId, id, body));
+    }
+
+    @DeleteMapping("/{id}/costs/{costId}")
+    public ApiResponse<PurchaseInvoiceResponse> removeCost(@CurrentStore UUID storeId, @PathVariable UUID id,
+                                                           @PathVariable UUID costId) {
+        return ApiResponse.ok(invoiceService.removeCost(storeId, id, costId));
+    }
+
+    @PostMapping("/{id}/payments/{paymentId}/assign")
+    public ApiResponse<PurchaseInvoiceResponse> assignFunding(@CurrentStore UUID storeId, @PathVariable UUID id,
+                                                              @PathVariable UUID paymentId,
+                                                              @Valid @RequestBody AssignFundingRequest body) {
+        return ApiResponse.ok(invoiceService.assignFunding(storeId, id, paymentId, body));
     }
 
     @PostMapping("/{id}/void")

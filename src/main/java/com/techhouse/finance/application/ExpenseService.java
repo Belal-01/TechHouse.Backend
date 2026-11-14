@@ -176,7 +176,7 @@ public class ExpenseService {
     }
 
     /** The sell rate for valuing an amount: required for SYP, kept for USD when there is one. */
-    ExchangeRateService.SaleRate rateFor(UUID storeId, String currency) {
+    public ExchangeRateService.SaleRate rateFor(UUID storeId, String currency) {
         ExchangeRateService.SaleRate rate = rates.saleRate(storeId).orElse(null);
         if (rate == null && "SYP".equals(currency)) {
             throw new BusinessException(HttpStatus.CONFLICT, "EXCHANGE_RATE_REQUIRED", "No exchange rate yet; enter today's rate first");
@@ -211,7 +211,7 @@ public class ExpenseService {
             join expense_categories c on c.id = e.category_id
             left join cash_accounts a on a.id = e.account_id
             left join advance_entries ae on ae.expense_id = e.id
-            left join staff_people p on p.id = ae.person_id""";
+            left join v_advance_people p on p.id = ae.person_id""";
 
     private static ExpenseResponse map(java.sql.ResultSet rs) throws java.sql.SQLException {
         UUID accountId = rs.getObject(10, UUID.class);

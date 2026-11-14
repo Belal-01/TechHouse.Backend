@@ -110,17 +110,59 @@ class ProcurementApiTests {
     }
 
     private static Map<String, Object> line(UUID product, int qty, String price) {
-        return Map.of("productId", product, "quantity", qty, "unitPriceUsd", new BigDecimal(price));
+        return Map.<String, Object>of("productId", product, "quantity", qty, "unitPriceUsd", new BigDecimal(price));
     }
 
-    private static Map<String, Object> invoice(UUID supplier, String shipping, String paidFrom, List<?> items) {
+    /** The partner used for "owner money" invoices in this test. */
+    private UUID owner;
+
+    /** An invoice that arrived, with one shipping cost; paidFrom INCOME = the default box, EXTERNAL_CAPITAL = an owner. */
+    private Map<String, Object> invoice(UUID supplier, String shipping, String paidFrom, List<Map<String, Object>> items) {
+        String source = switch (paidFrom) {
+            case "INCOME" -> "ACCOUNT";
+            case "EXTERNAL_CAPITAL" -> "OWNER";
+            default -> paidFrom;
+        };
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("supplierId", supplier);
         m.put("invoiceDate", "2026-11-01");
-        m.put("shippingCostUsd", new BigDecimal(shipping));
-        m.put("paidFrom", paidFrom);
+        m.put("status", "RECEIVED");
+        BigDecimal goods = items.stream()
+                .map(l -> ((BigDecimal) l.get("unitPriceUsd")).multiply(BigDecimal.valueOf((Integer) l.get("quantity"))))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        m.put("payments", List.of(payer(source, goods)));
+        if (new BigDecimal(shipping).signum() != 0) {
+            Map<String, Object> cost = new LinkedHashMap<>(payer(source, null));
+            cost.remove("amountUsd");
+            cost.put("kind", "OTHER");
+            cost.put("amount", new BigDecimal(shipping));
+            cost.put("currency", "USD");
+            m.put("costs", List.of(cost));
+        }
         m.put("items", items);
         return m;
+    }
+
+    private Map<String, Object> payer(String source, BigDecimal amountUsd) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("source", source);
+        if ("OWNER".equals(source)) p.put("partnerId", owner);
+        if (amountUsd != null) p.put("amountUsd", amountUsd);
+        return p;
+    }
+
+    private static Map<String, Object> cost(String kind, String amount, String source, UUID partner) {
+        Map<String, Object> c = new LinkedHashMap<>();
+        c.put("kind", kind);
+        c.put("amount", new BigDecimal(amount));
+        c.put("currency", "USD");
+        c.put("source", source);
+        if (partner != null) c.put("partnerId", partner);
+        return c;
+    }
+
+    private static BigDecimal dec(JsonNode node) {
+        return node.decimalValue();
     }
 
     private BigDecimal ledgerSum(UUID invoiceId) {
@@ -148,6 +190,18 @@ class ProcurementApiTests {
                                 Map.of("email", EMAIL, "password", "secret-pass")))).build(),
                 HttpResponse.BodyHandlers.ofString()).body()).path("data").path("accessToken").asString();
 
+        // --- partners: an owner and an investor
+        String partners = "/api/v1/admin/finance/partners";
+        Reply ownerReply = call("POST", partners, Map.of("name", "Owner " + RUN, "kind", "OWNER", "profitPercent", 50));
+        assertEquals(201, ownerReply.status(), ownerReply.body().toString());
+        owner = UUID.fromString(ownerReply.data().path("id").asString());
+        Reply investorReply = call("POST", partners, Map.of("name", "Investor " + RUN, "kind", "INVESTOR", "profitPercent", 50));
+        UUID investor = UUID.fromString(investorReply.data().path("id").asString());
+        assertEquals("PARTNER_NAME_EXISTS", call("POST", partners, Map.of("name", "owner " + RUN, "kind", "INVESTOR",
+                "profitPercent", 50)).code());
+        assertEquals("VALIDATION_ERROR", call("POST", partners, Map.of("name", "X " + RUN, "kind", "OWNER",
+                "profitPercent", 150)).code());
+
         // --- suppliers
         String base = "/api/v1/admin/procurement/suppliers";
         Reply noName = call("POST", base, Map.of("name", " "));
@@ -173,14 +227,14 @@ class ProcurementApiTests {
         String inv = "/api/v1/admin/procurement/invoices";
         Reply created = call("POST", inv, invoice(supplierId, "200", "INCOME", List.of(line(a, 100, "10"), line(b, 50, "20"))));
         assertEquals(201, created.status(), created.body().toString());
-        JsonNode d = created.data();
-        assertTrue(d.path("invoiceNumber").asString().startsWith("PI-"));
-        assertEquals(0, new BigDecimal("2000").compareTo(d.path("itemsTotalUsd").decimalValue()));
-        assertEquals(0, new BigDecimal("2200").compareTo(d.path("totalUsd").decimalValue()));
-        assertEquals(0, new BigDecimal("11").compareTo(d.path("items").get(0).path("landedUnitCost").decimalValue()));
-        assertEquals(0, new BigDecimal("22").compareTo(d.path("items").get(1).path("landedUnitCost").decimalValue()));
-        assertEquals(0, new BigDecimal("100").compareTo(d.path("items").get(0).path("extraCostUsd").decimalValue()));
-        UUID invoiceId = UUID.fromString(d.path("id").asString());
+        JsonNode cd = created.data();
+        assertTrue(cd.path("invoiceNumber").asString().startsWith("PI-"));
+        assertEquals(0, new BigDecimal("2000").compareTo(cd.path("itemsTotalUsd").decimalValue()));
+        assertEquals(0, new BigDecimal("2200").compareTo(cd.path("totalUsd").decimalValue()));
+        assertEquals(0, new BigDecimal("11").compareTo(cd.path("items").get(0).path("landedUnitCost").decimalValue()));
+        assertEquals(0, new BigDecimal("22").compareTo(cd.path("items").get(1).path("landedUnitCost").decimalValue()));
+        assertEquals(0, new BigDecimal("100").compareTo(cd.path("items").get(0).path("extraCostUsd").decimalValue()));
+        UUID invoiceId = UUID.fromString(cd.path("id").asString());
 
         // one FIFO lot per line, costed at the landed cost
         List<Map<String, Object>> lots = jdbc.queryForList("""
@@ -190,9 +244,9 @@ class ProcurementApiTests {
         assertEquals(100, lots.get(0).get("qty_left"));
         assertEquals(0, new BigDecimal("11").compareTo((BigDecimal) lots.get(0).get("unit_cost")));
 
-        // paid from income: cash goes down by the whole invoice, once
+        // paid from the box: cash goes down by the whole invoice, one movement for the goods and one for the shipping
         assertEquals(0, new BigDecimal("-2200").compareTo(ledgerSum(invoiceId)));
-        assertEquals(1, jdbc.queryForObject("select count(*) from cash_movements where reference_id = ?", Integer.class, invoiceId));
+        assertEquals(2, jdbc.queryForObject("select count(*) from cash_movements where reference_id = ?", Integer.class, invoiceId));
 
         // inventory value + cash change must match: landed value of lots == what was paid
         BigDecimal stockValue = jdbc.queryForObject("""
@@ -209,10 +263,11 @@ class ProcurementApiTests {
         for (JsonNode item : rounded.data().path("items")) sum = sum.add(item.path("extraCostUsd").decimalValue());
         assertEquals(0, new BigDecimal("100").compareTo(sum));
         assertEquals(0, new BigDecimal("33.3334").compareTo(rounded.data().path("items").get(2).path("extraCostUsd").decimalValue()));
-        // external capital: money in and out again, net zero on cash, but two ledger rows
+        // an owner's own money never goes through a box: no cash movement at all
         UUID roundedId = UUID.fromString(rounded.data().path("id").asString());
-        assertEquals(0, BigDecimal.ZERO.compareTo(ledgerSum(roundedId)));
-        assertEquals(2, jdbc.queryForObject("select count(*) from cash_movements where reference_id = ?", Integer.class, roundedId));
+        assertEquals(0, jdbc.queryForObject("select count(*) from cash_movements where reference_id = ?", Integer.class, roundedId));
+        assertEquals(0, new BigDecimal("130").compareTo(dec(rounded.data().path("funding").path("ownersUsd"))));
+        assertEquals("Owner " + RUN, rounded.data().path("payments").get(0).path("partner").path("name").asString());
 
         // --- no shipping at all
         Reply plain = call("POST", inv, invoice(null, "0", "INCOME", List.of(line(a, 2, "5"))));
@@ -286,6 +341,99 @@ class ProcurementApiTests {
         assertEquals(200, callSales("POST", "/orders/" + order.data().path("id").asString() + "/void", null).status());
         assertTrue(call("GET", inv + "/" + invoiceId, null).data().path("voidable").asBoolean());
 
+        // --- two stages: bought and on its way, then arrived
+        UUID d = newProduct("D");
+        Map<String, Object> onTheWay = new LinkedHashMap<>();
+        onTheWay.put("invoiceDate", "2026-11-02");
+        onTheWay.put("status", "IN_TRANSIT");
+        onTheWay.put("items", List.of(line(d, 100, "10")));
+        onTheWay.put("costs", List.of(cost("CHINA_SHIPPING", "50", "ACCOUNT", null)));
+        // goods 1000: 600 from the box, 400 from an owner; payments must add up to the goods
+        onTheWay.put("payments", List.of(payer("ACCOUNT", new BigDecimal("600")), payer("OWNER", new BigDecimal("300"))));
+        Reply mismatch = call("POST", inv, onTheWay);
+        assertEquals("PAYMENTS_TOTAL_MISMATCH", mismatch.code());
+        assertTrue(mismatch.body().path("fieldErrors").has("payments"));
+        onTheWay.put("payments", List.of(payer("ACCOUNT", new BigDecimal("600")),
+                Map.of("source", "OWNER", "partnerId", investor, "amountUsd", 400)));
+        assertEquals("PARTNER_KIND_MISMATCH", call("POST", inv, onTheWay).code());
+        onTheWay.put("payments", List.of(payer("ACCOUNT", new BigDecimal("600")), payer("OWNER", new BigDecimal("400"))));
+        Reply transit = call("POST", inv, onTheWay);
+        assertEquals(201, transit.status(), transit.body().toString());
+        UUID transitId = UUID.fromString(transit.data().path("id").asString());
+        String transitPath = inv + "/" + transitId;
+        assertEquals("IN_TRANSIT", transit.data().path("status").asString());
+        assertEquals(0, new BigDecimal("10.5").compareTo(dec(transit.data().path("items").get(0).path("landedUnitCost"))));
+        assertEquals(0, new BigDecimal("650").compareTo(dec(transit.data().path("funding").path("storeUsd"))));
+        assertEquals(0, new BigDecimal("400").compareTo(dec(transit.data().path("funding").path("ownersUsd"))));
+        assertEquals(0, new BigDecimal("-650").compareTo(ledgerSum(transitId)));     // only the box part left the box
+        assertEquals(0, jdbc.queryForObject("""
+                select count(*) from inventory_lots l join invoice_items i on i.id = l.invoice_item_id
+                where i.invoice_id = ?""", Integer.class, transitId));                 // nothing sellable yet
+        JsonNode stockD = call("GET", "/api/v1/admin/inventory/stock/" + d, null).data();
+        assertEquals(100, stockD.path("summary").path("incoming").asInt(), stockD.toString());
+        assertEquals(0, stockD.path("summary").path("available").asInt());
+        JsonNode wealth = call("GET", "/api/v1/admin/dashboard/wealth", null).data();
+        assertTrue(wealth.path("incoming").valueStream().anyMatch(r -> r.path("invoiceId").asString().equals(transitId.toString())
+                && new BigDecimal("1050").compareTo(r.path("valueUsd").decimalValue()) == 0));
+        assertEquals("IN_TRANSIT", call("GET", inv + "?status=IN_TRANSIT", null).data().path("content").valueStream()
+                .filter(r -> r.path("id").asString().equals(transitId.toString())).findFirst().orElseThrow()
+                .path("status").asString());
+
+        // a cost added by mistake on the way can be removed: the box gets it back
+        Reply extraCost = call("POST", transitPath + "/costs", cost("OTHER", "30", "ACCOUNT", null));
+        assertEquals(200, extraCost.status(), extraCost.body().toString());
+        assertEquals(0, new BigDecimal("1080").compareTo(dec(extraCost.data().path("totalUsd"))));
+        String mistakeCost = extraCost.data().path("costs").get(1).path("id").asString();
+        Reply removed = call("DELETE", transitPath + "/costs/" + mistakeCost, null);
+        assertEquals(200, removed.status(), removed.body().toString());
+        assertEquals(1, removed.data().path("costs").size());
+        assertEquals(0, new BigDecimal("-650").compareTo(ledgerSum(transitId)));
+
+        // arrival: sea freight from the owner, customs from the box → each unit 10 + 200/100 = 12$
+        Reply arrived = call("POST", transitPath + "/receive", Map.of("costs", List.of(
+                cost("SEA_FREIGHT", "100", "OWNER", owner), cost("CUSTOMS", "50", "ACCOUNT", null))));
+        assertEquals(200, arrived.status(), arrived.body().toString());
+        assertEquals("RECEIVED", arrived.data().path("status").asString());
+        assertTrue(arrived.data().path("receivedAt").isString());
+        assertEquals(0, new BigDecimal("12").compareTo(dec(arrived.data().path("items").get(0).path("landedUnitCost"))));
+        assertEquals(100, arrived.data().path("unitsInStock").asInt());
+        assertEquals(0, new BigDecimal("-700").compareTo(ledgerSum(transitId)));
+        assertEquals("INVOICE_ALREADY_RECEIVED", call("POST", transitPath + "/receive", null).code());
+        String arrivedCost = arrived.data().path("costs").get(1).path("id").asString();
+        assertEquals("INVOICE_COST_LOCKED", call("DELETE", transitPath + "/costs/" + arrivedCost, null).code());
+
+        // one unit sold at 12$, then a late 99$ cost: spread over the 99 left → 13$ each; the sold one stays at 12$
+        Reply sale = callSales("POST", "/orders", Map.of("customerName", "test", "currency", "USD",
+                "items", List.of(Map.of("productId", d, "quantity", 1, "unitPrice", 50))));
+        assertEquals(201, sale.status(), sale.body().toString());
+        assertEquals(0, new BigDecimal("12").compareTo(dec(sale.data().path("items").get(0).path("costUsd"))));
+        Reply late = call("POST", transitPath + "/costs", cost("OTHER", "99", "ACCOUNT", null));
+        assertEquals(200, late.status(), late.body().toString());
+        assertTrue(late.data().path("costs").get(3).path("afterReceipt").asBoolean());
+        assertEquals(0, new BigDecimal("13").compareTo(jdbc.queryForObject("""
+                select l.unit_cost from inventory_lots l join invoice_items i on i.id = l.invoice_item_id
+                where i.invoice_id = ?""", BigDecimal.class, transitId)));
+        assertEquals(false, late.data().path("voidable").asBoolean());
+
+        // outside money from before payment sources existed is assigned to people afterwards
+        UUID legacyPayment = jdbc.queryForObject("""
+                select id from purchase_invoice_payments where invoice_id = ? and cost_id is null""", UUID.class, roundedId);
+        jdbc.update("update purchase_invoice_payments set source = 'EXTERNAL', partner_id = null where id = ?", legacyPayment);
+        assertTrue(call("GET", inv, null).data().path("content").valueStream()
+                .anyMatch(r -> r.path("id").asString().equals(roundedId.toString()) && r.path("unassigned").asBoolean()));
+        String assign = inv + "/" + roundedId + "/payments/" + legacyPayment + "/assign";
+        assertEquals("FUNDING_TOTAL_MISMATCH", call("POST", assign, Map.of("parts", List.of(
+                Map.of("source", "OWNER", "partnerId", owner, "amount", 10)))).code());
+        Reply assigned = call("POST", assign, Map.of("parts", List.of(
+                Map.of("source", "OWNER", "partnerId", owner, "amount", 10),
+                Map.of("source", "INVESTOR", "partnerId", investor, "amount", 20))));
+        assertEquals(200, assigned.status(), assigned.body().toString());
+        assertEquals(0, new BigDecimal("20").compareTo(dec(assigned.data().path("funding").path("investorsUsd"))));
+        assertEquals(0, BigDecimal.ZERO.compareTo(dec(assigned.data().path("funding").path("unassignedUsd"))));
+        assertEquals(0, jdbc.queryForObject("select count(*) from cash_movements where reference_id = ?", Integer.class, roundedId));
+        JsonNode investorRow = call("GET", partners + "/" + investor, null).data();
+        assertEquals(0, new BigDecimal("20").compareTo(dec(investorRow.path("fundedUsd"))));
+
         // --- a supplier with invoices can be deactivated but not deleted
         assertEquals("SUPPLIER_IN_USE", call("DELETE", base + "/" + supplierId, null).code());
         int version = call("GET", base + "/" + supplierId, null).data().path("version").asInt();
@@ -296,12 +444,15 @@ class ProcurementApiTests {
         assertEquals(204, call("DELETE", base + "/" + lonely.data().path("id").asString(), null).status());
 
         // --- cleanup (the ledger is append-only, so its test rows stay)
-        jdbc.update("delete from order_status_history where order_id in (select order_id from order_items where product_id in (?, ?, ?))", a, b, c);
-        jdbc.update("delete from order_item_allocations where order_item_id in (select id from order_items where product_id in (?, ?, ?))", a, b, c);
-        jdbc.update("delete from orders where id in (select order_id from order_items where product_id in (?, ?, ?))", a, b, c);
-        jdbc.update("delete from inventory_lots where product_id in (?, ?, ?)", a, b, c);
-        jdbc.update("delete from purchase_invoices where id in (select invoice_id from invoice_items where product_id in (?, ?, ?))", a, b, c);
-        jdbc.update("delete from invoice_items where product_id in (?, ?, ?)", a, b, c);
+        jdbc.update("delete from order_status_history where order_id in (select order_id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
+        jdbc.update("delete from order_item_allocations where order_item_id in (select id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
+        jdbc.update("delete from orders where id in (select order_id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
+        jdbc.update("delete from inventory_lots where product_id in (?, ?, ?, ?)", a, b, c, d);
+        jdbc.update("delete from purchase_invoices where id in (select invoice_id from invoice_items where product_id in (?, ?, ?, ?))", a, b, c, d);
+        jdbc.update("delete from invoice_items where product_id in (?, ?, ?, ?)", a, b, c, d);
+        jdbc.update("delete from staff_people where partner_id in (select id from partners where store_id = ? and name like ?)",
+                STORE, "%" + RUN + "%");
+        jdbc.update("delete from partners where store_id = ? and name like ?", STORE, "%" + RUN + "%");
         jdbc.update("delete from suppliers where store_id = ? and name like ?", STORE, "%" + RUN + "%");
         jdbc.update("delete from products where store_id = ? and name like ?", STORE, "%" + RUN + "%");
         jdbc.update("delete from store_members where user_id = ?", user.getId());

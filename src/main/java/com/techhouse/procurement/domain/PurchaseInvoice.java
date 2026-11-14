@@ -8,7 +8,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -31,14 +30,12 @@ public class PurchaseInvoice extends BaseEntity {
     @Column(name = "invoice_date", nullable = false)
     private LocalDate invoiceDate;
 
-    @Column(name = "shipping_cost_usd", nullable = false, precision = 19, scale = 4)
-    private BigDecimal shippingCostUsd = BigDecimal.ZERO;
+    /** IN_TRANSIT: paid, on its way, not sellable yet. RECEIVED: arrived, its units are in stock. */
+    @Column(nullable = false, length = 20)
+    private String status;
 
-    @Column(name = "customs_cost_usd", nullable = false, precision = 19, scale = 4)
-    private BigDecimal customsCostUsd = BigDecimal.ZERO;
-
-    @Column(name = "paid_from", nullable = false, length = 20)
-    private String paidFrom;
+    @Column(name = "received_at")
+    private java.time.Instant receivedAt;
 
     private String notes;
 
@@ -48,8 +45,4 @@ public class PurchaseInvoice extends BaseEntity {
 
     @Column(name = "void_note")
     private String voidNote;
-
-    /** The box the invoice was paid from. */
-    @Column(name = "account_id", updatable = false)
-    private UUID accountId;
 }

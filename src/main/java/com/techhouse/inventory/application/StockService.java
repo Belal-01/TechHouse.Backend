@@ -37,6 +37,16 @@ public class StockService {
                     transit.put(rs.getObject(1, UUID.class), new Transit(rs.getInt(2), rs.getBigDecimal(3)));
                 }, storeId);
 
+        Map<UUID, Integer> incoming = new HashMap<>();
+        jdbc.query("""
+                select ii.product_id, sum(ii.quantity) from invoice_items ii
+                join purchase_invoices pi on pi.id = ii.invoice_id
+                where pi.store_id = ? and pi.status = 'IN_TRANSIT' and pi.voided_at is null
+                group by ii.product_id""",
+                rs -> {
+                    incoming.put(rs.getObject(1, UUID.class), rs.getInt(2));
+                }, storeId);
+
         return jdbc.query("""
                 select p.id, p.name, p.sku, p.selling_price, p.active,
                        coalesce(sum(l.qty_left), 0), coalesce(sum(l.qty_left * l.unit_cost), 0), count(l.id) > 0
@@ -54,7 +64,7 @@ public class StockService {
                     boolean stocked = rs.getBoolean(8);
                     int available = rs.getInt(6);
                     return new StockItem(id, rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getBoolean(5),
-                            available, rs.getBigDecimal(7), t.qty(), t.value(), stocked,
+                            available, rs.getBigDecimal(7), t.qty(), t.value(), incoming.getOrDefault(id, 0), stocked,
                             stocked && rs.getBoolean(5) && available < lowStockThreshold);
                 }, storeId);
     }

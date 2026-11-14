@@ -122,11 +122,22 @@ public class DashboardService {
                         rs.getInt(5), money(rs.getBigDecimal(6))), storeId)
                 .stream().filter(s -> s.available() > 0 || s.inTransit() > 0).toList();
 
+        List<Wealth.Incoming> incoming = jdbc.query("""
+                select i.id, i.invoice_number, i.invoice_date, s.name,
+                       coalesce((select sum(ii.quantity) from invoice_items ii where ii.invoice_id = i.id), 0),
+                       coalesce((select sum(ii.quantity * ii.unit_price_usd) from invoice_items ii where ii.invoice_id = i.id), 0)
+                     + coalesce((select sum(c.amount_usd) from purchase_invoice_costs c where c.invoice_id = i.id), 0)
+                from purchase_invoices i left join suppliers s on s.id = i.supplier_id
+                where i.store_id = ? and i.status = 'IN_TRANSIT' and i.voided_at is null
+                order by i.invoice_date, i.invoice_number""",
+                (rs, i) -> new Wealth.Incoming(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, java.time.LocalDate.class),
+                        rs.getString(4), rs.getInt(5), money(rs.getBigDecimal(6))), storeId);
+
         List<Wealth.Advance> advances = jdbc.query("""
                 select p.id, p.name,
                        coalesce(sum(e.amount) filter (where e.currency = 'USD'), 0),
                        coalesce(sum(e.amount) filter (where e.currency = 'SYP'), 0)
-                from staff_people p join advance_entries e on e.person_id = p.id
+                from v_advance_people p join advance_entries e on e.person_id = p.id
                 where p.store_id = ? group by p.id, p.name order by p.name""",
                 (rs, i) -> new Wealth.Advance(rs.getObject(1, UUID.class), rs.getString(2), rs.getBigDecimal(3),
                         rs.getBigDecimal(4), money(usd(rs.getBigDecimal(3), rs.getBigDecimal(4), sell))), storeId)
@@ -135,12 +146,13 @@ public class DashboardService {
         BigDecimal cash = accounts.stream().map(Wealth.Account::valueUsd).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal warehouse = stock.stream().map(Wealth.Stock::valueUsd).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal transit = stock.stream().map(Wealth.Stock::inTransitValueUsd).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal coming = incoming.stream().map(Wealth.Incoming::valueUsd).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal adv = advances.stream().map(Wealth.Advance::valueUsd).reduce(BigDecimal.ZERO, BigDecimal::add);
         boolean sypExcluded = sell == null && (accounts.stream().anyMatch(a -> a.syp().signum() != 0)
                 || advances.stream().anyMatch(a -> a.syp().signum() != 0));
-        Wealth.Totals totals = new Wealth.Totals(money(cash), money(warehouse), money(transit), money(adv),
-                money(cash.add(warehouse).add(transit).add(adv)), sypExcluded);
-        return new Wealth(totals, accounts, stock, advances, rate);
+        Wealth.Totals totals = new Wealth.Totals(money(cash), money(warehouse), money(transit), money(coming), money(adv),
+                money(cash.add(warehouse).add(transit).add(coming).add(adv)), sypExcluded);
+        return new Wealth(totals, accounts, stock, incoming, advances, rate);
     }
 
     @Transactional

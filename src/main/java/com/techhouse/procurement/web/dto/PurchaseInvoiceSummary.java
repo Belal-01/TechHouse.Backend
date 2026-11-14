@@ -7,11 +7,13 @@ import java.util.UUID;
 public record PurchaseInvoiceSummary(
         UUID id,
         String invoiceNumber,
-        PurchaseInvoiceResponse.SupplierRef supplier,
+        PurchaseInvoiceResponse.Ref supplier,
         LocalDate invoiceDate,
+        String status,
         int itemCount,
         BigDecimal totalUsd,
-        String paidFrom,
         boolean hasAttachment,
-        boolean voided
+        boolean voided,
+        /** Part of it was paid with outside money not yet attributed to a person. */
+        boolean unassigned
 ) {}

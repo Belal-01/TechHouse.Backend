@@ -18,7 +18,8 @@ public interface PurchaseInvoiceRepository extends JpaRepository<PurchaseInvoice
             select i from PurchaseInvoice i
             where i.storeId = :storeId
               and (cast(:supplierId as uuid) is null or i.supplierId = :supplierId)
+              and (cast(:status as string) is null or (i.status = :status and i.voidedAt is null))
             """)
     Page<PurchaseInvoice> search(@Param("storeId") UUID storeId, @Param("supplierId") UUID supplierId,
-                                 Pageable pageable);
+                                 @Param("status") String status, Pageable pageable);
 }

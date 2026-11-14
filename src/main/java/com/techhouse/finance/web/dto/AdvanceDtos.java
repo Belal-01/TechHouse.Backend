@@ -24,7 +24,7 @@ public final class AdvanceDtos {
 
     /** @param owedUsd / owedSyp what the person still owes the shop, per currency */
     public record PersonResponse(UUID id, String name, String phone, boolean active, BigDecimal owedUsd, BigDecimal owedSyp,
-                                 int version) {}
+                                 int version, String partnerKind, UUID partnerId) {}
 
     /** Takes money from a box, or gives it back to one. */
     public record CashRequest(

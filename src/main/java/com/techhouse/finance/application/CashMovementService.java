@@ -114,7 +114,7 @@ public class CashMovementService {
                 left join orders o on m.reference_type = 'ORDER' and o.id = m.reference_id
                 left join purchase_invoices i on m.reference_type = 'PURCHASE_INVOICE' and i.id = m.reference_id
                 left join expenses e on m.reference_type = 'EXPENSE' and e.id = m.reference_id
-                left join staff_people sp on m.reference_type = 'PERSON' and sp.id = m.reference_id
+                left join v_advance_people sp on m.reference_type = 'PERSON' and sp.id = m.reference_id
                 where %s
                 order by m.created_at desc, m.id desc limit ? offset ?""".formatted(where),
                 (rs, i) -> {

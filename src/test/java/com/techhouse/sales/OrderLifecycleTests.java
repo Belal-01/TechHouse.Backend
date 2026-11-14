@@ -194,8 +194,10 @@ class OrderLifecycleTests {
 
         // --- 1 & 2: invoices → lots at 6$ and 7$
         for (String price : List.of("5", "6")) {
-            Reply inv = call("POST", "/procurement/invoices", Map.of("invoiceDate", "2026-11-01", "shippingCostUsd", 10,
-                    "paidFrom", "INCOME", "items", List.of(Map.of("productId", a, "quantity", 10, "unitPriceUsd", new BigDecimal(price)))));
+            Reply inv = call("POST", "/procurement/invoices", Map.of("invoiceDate", "2026-11-01", "status", "RECEIVED",
+                    "costs", List.of(Map.of("kind", "OTHER", "amount", 10, "currency", "USD", "source", "ACCOUNT")),
+                    "payments", List.of(Map.of("source", "ACCOUNT", "amountUsd", new BigDecimal(price).multiply(BigDecimal.TEN))),
+                    "items", List.of(Map.of("productId", a, "quantity", 10, "unitPriceUsd", new BigDecimal(price)))));
             assertEquals(201, inv.status(), inv.body().toString());
         }
         assertEquals(0, new BigDecimal("870").compareTo(wallet("USD")));
@@ -289,7 +291,7 @@ class OrderLifecycleTests {
         assertEquals(201, category.status());
         UUID rentId = UUID.fromString(category.data().path("id").asString());
         Reply rent = call("POST", "/finance/expenses", Map.of("categoryId", rentId, "amount", 290000, "currency", "SYP",
-                "accountId", hand, "expenseDate", "2026-11-08", "description", "إيجار تشرين"));
+                "accountId", hand, "expenseDate", java.time.LocalDate.now(java.time.ZoneId.of("Asia/Damascus")).toString(), "description", "إيجار تشرين"));
         assertEquals(201, rent.status(), rent.body().toString());
         assertMoney("20.00", rent.data().path("amountUsd"));                       // 290,000 / 14,500
         assertMoney("47.59", new tools.jackson.databind.node.DecimalNode(netProfit()));
@@ -319,13 +321,34 @@ class OrderLifecycleTests {
         UUID packaging = UUID.fromString(call("GET", "/finance/expense-categories", null).data().valueStream()
                 .filter(c -> c.path("name").asString().equals("تغليف")).findFirst().orElseThrow().path("id").asString());
         Reply spent = call("POST", person + "/spend", Map.of("currency", "SYP", "amount", 14500, "categoryId", packaging,
-                "expenseDate", "2026-11-08", "description", "علب"));
+                "expenseDate", java.time.LocalDate.now(java.time.ZoneId.of("Asia/Damascus")).toString(), "description", "علب"));
         assertEquals(200, spent.status(), spent.body().toString());
         assertEquals(0, new BigDecimal("45500").compareTo(spent.data().path("owedSyp").decimalValue()));
         assertMoney("66.59", new tools.jackson.databind.node.DecimalNode(netProfit()));   // 1$ of packaging
         assertEquals(3, call("GET", person + "/entries", null).data().size());
         assertTrue(netWorth().subtract(startWorth).subtract(netProfit()).abs().compareTo(new BigDecimal("0.01")) < 0,
                 "after advances: net worth changed by " + netWorth().subtract(startWorth) + ", profit " + netProfit());
+
+        for (String kind : List.of("OWNER", "INVESTOR")) {
+            Reply partner = call("POST", "/finance/partners", Map.of("name", kind + " " + run, "kind", kind, "profitPercent", 50));
+            assertEquals(201, partner.status(), partner.body().toString());
+            String id = partner.data().path("id").asString();
+            String profile = "/finance/people/" + id;
+            assertEquals(kind, call("GET", profile, null).data().path("partnerKind").asString());
+            Map<String, Object> cash = Map.of("accountId", hand, "currency", "USD", "amount", 12);
+            Reply advanced = call("POST", profile + "/withdraw", cash);
+            assertEquals(200, advanced.status(), advanced.body().toString());
+            assertMoney("12", advanced.data().path("owedUsd"));
+            assertEquals("PERSON_NAME_EXISTS", call("POST", "/finance/people",
+                    Map.of("name", partner.data().path("name").asString())).code());
+            Reply updated = call("PUT", "/finance/partners/" + id, Map.of("name", kind + " updated " + run,
+                    "profitPercent", 50, "active", false, "version", partner.data().path("version").asInt()));
+            assertEquals(200, updated.status(), updated.body().toString());
+            assertEquals(updated.data().path("name"), call("GET", profile, null).data().path("name"));
+            assertEquals("PERSON_INACTIVE", call("POST", profile + "/withdraw", cash).code());
+            assertMoney("0", call("POST", profile + "/return", cash).data().path("owedUsd"));
+            assertEquals(2, call("GET", profile + "/entries", null).data().size());
+        }
 
         // --- inventory screen: lots in FIFO order with what is left, and the orders that took from them
         Reply productStock = call("GET", "/inventory/stock/" + a, null);

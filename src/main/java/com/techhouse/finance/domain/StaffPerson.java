@@ -21,7 +21,6 @@ public class StaffPerson extends BaseEntity {
     @Column(name = "store_id", nullable = false, updatable = false)
     private UUID storeId;
 
-    @Column(nullable = false)
     private String name;
 
     @Column(length = 50)

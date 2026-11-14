@@ -21,6 +21,8 @@ public record StockItem(
         BigDecimal valueUsd,
         int inTransit,
         BigDecimal inTransitValueUsd,
+        /** Units on invoices still on their way (bought, not arrived yet). */
+        int incoming,
         boolean stocked,
         boolean low
 ) {}
