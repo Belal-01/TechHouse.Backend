@@ -108,13 +108,14 @@ public class CashMovementService {
         List<MovementResponse> rows = jdbc.query("""
                 select m.id, a.id, a.name, m.wallet_currency, m.movement_type, m.amount, m.exchange_rate_snapshot,
                        m.reference_type, m.reference_id,
-                       coalesce(o.order_number, i.invoice_number, e.description, sp.name), m.exchange_group, m.note, m.created_at
+                       coalesce(o.order_number, i.invoice_number, e.description, sp.name, investor.name), m.exchange_group, m.note, m.created_at
                 from cash_movements m
                 join cash_accounts a on a.id = m.account_id
                 left join orders o on m.reference_type = 'ORDER' and o.id = m.reference_id
                 left join purchase_invoices i on m.reference_type = 'PURCHASE_INVOICE' and i.id = m.reference_id
                 left join expenses e on m.reference_type = 'EXPENSE' and e.id = m.reference_id
                 left join v_advance_people sp on m.reference_type = 'PERSON' and sp.id = m.reference_id
+                left join partners investor on m.reference_type = 'INVESTOR' and investor.id = m.reference_id
                 where %s
                 order by m.created_at desc, m.id desc limit ? offset ?""".formatted(where),
                 (rs, i) -> {

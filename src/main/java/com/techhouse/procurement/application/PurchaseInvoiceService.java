@@ -7,6 +7,7 @@ import com.techhouse.finance.application.ExchangeRateService;
 import com.techhouse.finance.application.ExpenseService;
 import com.techhouse.finance.application.LedgerService;
 import com.techhouse.finance.application.PartnerService;
+import com.techhouse.finance.application.InvestorSettlementService;
 import com.techhouse.finance.domain.CashAccount;
 import com.techhouse.inventory.domain.InventoryLot;
 import com.techhouse.procurement.domain.InvoiceCost;
@@ -85,6 +86,7 @@ public class PurchaseInvoiceService {
     private final LedgerService ledger;
     private final CashAccountService accounts;
     private final PartnerService partners;
+    private final InvestorSettlementService investorSettlements;
     private final ExpenseService expenses;
     private final EntityManager em;
 
@@ -319,6 +321,7 @@ public class PurchaseInvoiceService {
                 where invoice_item_id in (select id from invoice_items where invoice_id = :invoice)""")
                 .setParameter("invoice", id).executeUpdate();
         reverseLedger(storeId, id, null, "إلغاء الفاتورة " + invoice.getInvoiceNumber());
+        investorSettlements.reverseReinvestment(id);
         invoice.setVoidedAt(Instant.now());
         invoice.setVoidNote(note == null || note.isBlank() ? null : note.trim());
         em.flush();
@@ -361,6 +364,10 @@ public class PurchaseInvoiceService {
             throw BusinessException.onField(HttpStatus.BAD_REQUEST, "PAYMENTS_TOTAL_MISMATCH", "payments",
                     "The payments must add up to the goods total " + total.stripTrailingZeros().toPlainString());
         }
+        payments.stream().filter(p -> Boolean.TRUE.equals(p.useInvestorBalance()))
+                .filter(p -> "INVESTOR".equals(p.source()) && p.partnerId() != null)
+                .map(InvoicePaymentRequest::partnerId).distinct().sorted()
+                .forEach(id -> investorSettlements.lockInvestor(storeId, id));
         BigDecimal left = total;
         for (int i = 0; i < payments.size(); i++) {
             InvoicePaymentRequest p = payments.get(i);
@@ -370,12 +377,24 @@ public class PurchaseInvoiceService {
                         "Each payment must be above zero");
             }
             left = left.subtract(amount);
-            pay(storeId, invoice, null, p.source(), p.accountId(), p.partnerId(), amount, "USD", amount, null,
+            boolean reinvest = Boolean.TRUE.equals(p.useInvestorBalance());
+            if (reinvest && !"INVESTOR".equals(p.source())) {
+                throw BusinessException.onField(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                        "payments[" + i + "].source", "Only investors can reinvest capital");
+            }
+            InvoicePayment payment = pay(storeId, invoice, null, p.source(), p.accountId(), p.partnerId(), amount, "USD", amount, null,
                     "payments[" + i + "].", "بضاعة الفاتورة " + invoice.getInvoiceNumber());
+            if (reinvest) {
+                em.flush();
+                investorSettlements.reinvest(storeId, p.partnerId(), payment.getId(), amount, "payments[" + i + "].amountUsd");
+                CashAccount box = accounts.resolve(storeId, p.accountId(), "payments[" + i + "].accountId");
+                ledger.record(LedgerService.Entry.of(storeId, box.getId(), "USD", "PURCHASE_PAYMENT", amount.negate())
+                        .ref("PURCHASE_INVOICE", invoice.getId()).group(payment.getId()).note("دفع من رأس مال المستثمر المسترد"));
+            }
         }
     }
 
-    private void pay(UUID storeId, PurchaseInvoice invoice, UUID costId, String source, UUID accountId, UUID partnerId,
+    private InvoicePayment pay(UUID storeId, PurchaseInvoice invoice, UUID costId, String source, UUID accountId, UUID partnerId,
                      BigDecimal amount, String currency, BigDecimal usd, ExchangeRateService.SaleRate rate, String prefix,
                      String label) {
         InvoicePayment p = new InvoicePayment();
@@ -399,6 +418,7 @@ public class PurchaseInvoiceService {
                     .ref("PURCHASE_INVOICE", invoice.getId()).group(p.getId()).note("دفع " + label);
             ledger.record(rate == null ? entry : entry.rate(rate.id(), rate.sellRate()));
         }
+        return p;
     }
 
     /** Reverses the box movements of the invoice: all of them, or only those of one payment. */

@@ -434,6 +434,40 @@ class ProcurementApiTests {
         JsonNode investorRow = call("GET", partners + "/" + investor, null).data();
         assertEquals(0, new BigDecimal("20").compareTo(dec(investorRow.path("fundedUsd"))));
 
+        // Investor funded 50% of the invoice and is entitled to 50% of that portion's net profit.
+        UUID settlementProduct = newProduct("Investor settlement");
+        Map<String, Object> fundedInvoice = invoice(supplierId, "0", "INCOME", List.of(line(settlementProduct, 10, "100")));
+        fundedInvoice.put("payments", List.of(
+                Map.of("source", "INVESTOR", "partnerId", investor, "amountUsd", 500),
+                payer("ACCOUNT", new BigDecimal("500"))));
+        Reply funded = call("POST", inv, fundedInvoice);
+        assertEquals(201, funded.status(), funded.body().toString());
+        UUID box = jdbc.queryForObject("select id from cash_accounts where store_id = ? and is_default", UUID.class, STORE);
+        Reply investorSale = callSales("POST", "/orders", Map.of("customerName", "Investor test", "currency", "USD",
+                "deliveryCost", 100, "deliveryCostCurrency", "USD", "deliveryAccountId", box,
+                "items", List.of(Map.of("productId", settlementProduct, "quantity", 10, "unitPrice", 150))));
+        assertEquals(201, investorSale.status(), investorSale.body().toString());
+        String salePath = "/orders/" + investorSale.data().path("id").asString();
+        assertEquals(200, callSales("POST", salePath + "/deliver", Map.of("accountId", box)).status());
+        String statement = partners + "/" + investor + "/settlement";
+        JsonNode account = call("GET", statement, null).data();
+        assertEquals(0, new BigDecimal("500").compareTo(dec(account.path("capitalAvailableUsd"))));
+        assertEquals(0, new BigDecimal("100").compareTo(dec(account.path("profitAvailableUsd"))));
+        assertEquals("INVESTOR_BALANCE_INSUFFICIENT", call("POST", statement + "/payout",
+                Map.of("kind", "PROFIT_PAYOUT", "accountId", box, "amount", 101)).code());
+        Reply paid = call("POST", statement + "/payout", Map.of("kind", "PROFIT_PAYOUT", "accountId", box, "amount", 40));
+        assertEquals(200, paid.status(), paid.body().toString());
+        assertEquals(0, new BigDecimal("60").compareTo(dec(paid.data().path("profitAvailableUsd"))));
+        Map<String, Object> reinvest = invoice(supplierId, "0", "INCOME", List.of(line(settlementProduct, 1, "100")));
+        reinvest.put("payments", List.of(Map.of("source", "INVESTOR", "partnerId", investor,
+                "amountUsd", 100, "useInvestorBalance", true)));
+        Reply reinvested = call("POST", inv, reinvest);
+        assertEquals(201, reinvested.status(), reinvested.body().toString());
+        assertEquals(0, new BigDecimal("400").compareTo(dec(call("GET", statement, null).data().path("capitalAvailableUsd"))));
+        assertEquals(200, call("POST", inv + "/" + reinvested.data().path("id").asString() + "/void", null).status());
+        assertEquals(0, new BigDecimal("500").compareTo(dec(call("GET", statement, null).data().path("capitalAvailableUsd"))));
+        jdbc.update("delete from investor_settlements where investor_id = ?", investor);
+
         // --- a supplier with invoices can be deactivated but not deleted
         assertEquals("SUPPLIER_IN_USE", call("DELETE", base + "/" + supplierId, null).code());
         int version = call("GET", base + "/" + supplierId, null).data().path("version").asInt();
@@ -444,12 +478,13 @@ class ProcurementApiTests {
         assertEquals(204, call("DELETE", base + "/" + lonely.data().path("id").asString(), null).status());
 
         // --- cleanup (the ledger is append-only, so its test rows stay)
-        jdbc.update("delete from order_status_history where order_id in (select order_id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
-        jdbc.update("delete from order_item_allocations where order_item_id in (select id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
-        jdbc.update("delete from orders where id in (select order_id from order_items where product_id in (?, ?, ?, ?))", a, b, c, d);
-        jdbc.update("delete from inventory_lots where product_id in (?, ?, ?, ?)", a, b, c, d);
-        jdbc.update("delete from purchase_invoices where id in (select invoice_id from invoice_items where product_id in (?, ?, ?, ?))", a, b, c, d);
-        jdbc.update("delete from invoice_items where product_id in (?, ?, ?, ?)", a, b, c, d);
+        jdbc.update("delete from order_status_history where order_id in (select order_id from order_items where product_id in (?, ?, ?, ?, ?))", a, b, c, d, settlementProduct);
+        jdbc.update("delete from order_item_allocations where order_item_id in (select id from order_items where product_id in (?, ?, ?, ?, ?))", a, b, c, d, settlementProduct);
+        jdbc.update("delete from expenses where order_id = ?", UUID.fromString(investorSale.data().path("id").asString()));
+        jdbc.update("delete from orders where id in (select order_id from order_items where product_id in (?, ?, ?, ?, ?))", a, b, c, d, settlementProduct);
+        jdbc.update("delete from inventory_lots where product_id in (?, ?, ?, ?, ?)", a, b, c, d, settlementProduct);
+        jdbc.update("delete from purchase_invoices where id in (select invoice_id from invoice_items where product_id in (?, ?, ?, ?, ?))", a, b, c, d, settlementProduct);
+        jdbc.update("delete from invoice_items where product_id in (?, ?, ?, ?, ?)", a, b, c, d, settlementProduct);
         jdbc.update("delete from staff_people where partner_id in (select id from partners where store_id = ? and name like ?)",
                 STORE, "%" + RUN + "%");
         jdbc.update("delete from partners where store_id = ? and name like ?", STORE, "%" + RUN + "%");

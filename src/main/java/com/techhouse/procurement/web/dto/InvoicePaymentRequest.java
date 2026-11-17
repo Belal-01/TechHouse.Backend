@@ -13,5 +13,6 @@ public record InvoicePaymentRequest(
         @NotNull @Pattern(regexp = "ACCOUNT|OWNER|INVESTOR") String source,
         UUID accountId,
         UUID partnerId,
-        @NotNull @DecimalMin("0.0001") @DecimalMax("100000000000") BigDecimal amountUsd
+        @NotNull @DecimalMin("0.0001") @DecimalMax("100000000000") BigDecimal amountUsd,
+        Boolean useInvestorBalance
 ) {}
