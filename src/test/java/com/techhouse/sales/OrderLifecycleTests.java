@@ -415,6 +415,28 @@ class OrderLifecycleTests {
                 Map.of("name", "Fast " + run, "active", false, "version", company.data().path("version").asInt())).status());
         assertEquals("DELIVERY_COMPANY_INACTIVE", call("POST", "/sales/orders", order("USD", a, 1, "12", "0", companyId)).code());
 
+        UUID material = UUID.randomUUID();
+        Map<String, Object> purchase = Map.of("id", material, "name", "Charging cables", "quantity", 10,
+                "costUsd", 1000, "accountId", hand, "date", today);
+        assertEquals(200, call("POST", "/installations/materials", purchase).status());
+        Map<String, Object> installation = Map.of("id", UUID.randomUUID(), "customer", "Charging customer",
+                "date", today, "receivedUsd", 180, "materialsUsd", 100, "technicianUsd", 35,
+                "receiptAccountId", hand, "technicianAccountId", shamCash);
+        assertEquals(200, call("POST", "/installations", installation).status());
+        assertEquals(200, call("POST", "/installations", installation).status());
+        assertEquals(200, call("PUT", "/installations/materials/" + material + "/depleted", Map.of()).status());
+        JsonNode installations = call("GET", "/installations", null).data();
+        assertMoney("1000", installations.path("costUsd"));
+        assertMoney("100", installations.path("coveredUsd"));
+        assertMoney("900", installations.path("uncoveredUsd"));
+        assertTrue(installations.path("materials").get(0).path("depleted").asBoolean());
+        assertEquals(1, installations.path("installations").size());
+        assertMoney("45", installations.path("installations").get(0).path("profitUsd"));
+        JsonNode withInstallations = call("GET", "/dashboard?from=" + today + "&to=" + today, null).data();
+        assertMoney("324", withInstallations.path("pnl").path("revenueUsd"));
+        assertMoney("111.59", withInstallations.path("pnl").path("netProfitUsd"));
+        assertMoney("111.59", withInstallations.path("series").get(0).path("netProfitUsd"));
+
         // The ledger can't be edited and the status history names who changed what, so the data stays
         // (as in production); only the store access is removed.
         jdbc.update("delete from store_members where user_id = ?", user.getId());

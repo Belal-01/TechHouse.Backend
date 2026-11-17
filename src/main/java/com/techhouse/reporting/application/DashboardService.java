@@ -82,6 +82,14 @@ public class DashboardService {
         BigDecimal expenses = sum("""
                 select coalesce(sum(amount_usd), 0) from expenses
                 where store_id = ? and voided_at is null and expense_date between ? and ?""", storeId, from, to);
+        BigDecimal[] installationTotals = jdbc.queryForObject("""
+                select coalesce(sum(received_usd), 0), coalesce(sum(materials_usd), 0), coalesce(sum(technician_usd), 0)
+                from charging_installations where store_id = ? and installed_on between ? and ?""",
+                (rs, row) -> new BigDecimal[]{rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3)},
+                storeId, from, to);
+        revenue = revenue.add(installationTotals[0]);
+        cogs = cogs.add(installationTotals[1]);
+        expenses = expenses.add(installationTotals[2]);
         int delivered = count("select count(*) from orders where store_id = ? and status = 'DELIVERED' and delivered_at >= ? and delivered_at < ?",
                 storeId, start, end);
         BigDecimal gross = revenue.subtract(cogs);
@@ -219,6 +227,17 @@ public class DashboardService {
                 rs -> {
                     BigDecimal[] b = buckets.get(rs.getObject(1, LocalDate.class));
                     if (b != null) b[1] = b[1].subtract(rs.getBigDecimal(2));
+                }, storeId, from, to);
+        jdbc.query("""
+                select date_trunc('%s', installed_on)::date, sum(received_usd),
+                       sum(received_usd - materials_usd - technician_usd)
+                from charging_installations where store_id = ? and installed_on between ? and ? group by 1""".formatted(unit),
+                rs -> {
+                    BigDecimal[] bucket = buckets.get(rs.getObject(1, LocalDate.class));
+                    if (bucket != null) {
+                        bucket[0] = bucket[0].add(rs.getBigDecimal(2));
+                        bucket[1] = bucket[1].add(rs.getBigDecimal(3));
+                    }
                 }, storeId, from, to);
         List<Point> points = new ArrayList<>();
         buckets.forEach((date, b) -> points.add(new Point(date, money(b[0]), money(b[1]))));
